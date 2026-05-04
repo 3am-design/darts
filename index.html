@@ -16,7 +16,7 @@
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     
     /* 動畫效果 */
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     .animate-fade-in { animation: fadeIn 0.3s ease-out; }
 
     /* 全局設定 - 針對 Safari 底部工具欄優化 */
@@ -31,7 +31,6 @@
       margin: 0;
     }
     
-    /* 使用 dvh (Dynamic Viewport Height) 確保在 Safari 工具列出現時自動縮放 */
     .app-container {
       height: 100vh;
       height: 100dvh;
@@ -40,10 +39,8 @@
       overflow: hidden;
     }
     
-    /* 消除按鈕預設點擊高光 */
     button { -webkit-tap-highlight-color: transparent; outline: none; }
     
-    /* 手機版點擊回饋樣式 */
     .tap-active { background-color: #333333 !important; color: #ffffff !important; transition: background-color 0.1s; }
     .key-tap-active { background-color: #ffffff !important; color: #000000 !important; }
   </style>
@@ -63,12 +60,11 @@
     // --- 工具函數 ---
     const cloneState = (state) => JSON.parse(JSON.stringify(state));
 
-    // --- DFS 結算路線算法 ---
     const ALL_TARGETS = [
       ...Array.from({length: 20}, (_, i) => 20 - i).map(i => ({v: i*3, l: `T${i}`, out: true})),
-      {v: 50, l: 'D-Bull', out: true},
+      {v: 50, l: 'D-BULL', out: true},
       ...[20,16,8,4,10,5,12,6,18,9,14,7,19,17,15,13,11,3,2,1].map(i => ({v: i*2, l: `D${i}`, out: true})),
-      {v: 25, l: 'S-Bull', out: false},
+      {v: 25, l: 'S-BULL', out: false},
       ...Array.from({length: 20}, (_, i) => 20 - i).map(i => ({v: i, l: `${i}`, out: false}))
     ];
 
@@ -247,23 +243,34 @@
     };
 
     const getTargetGeometry = (label) => {
-      if (!label || label === 'MISS') return null;
-      if (label === 'S-Bull') return { path: `<circle cx="0" cy="0" r="15" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
-      if (label === 'D-Bull') return { path: `<circle cx="0" cy="0" r="6" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
+      if (!label) return null;
+      const upperLabel = label.toUpperCase();
+      
+      // 處理 Bullseye
+      if (upperLabel === 'S-BULL') return { path: `<circle cx="0" cy="0" r="15" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
+      if (upperLabel === 'D-BULL') return { path: `<circle cx="0" cy="0" r="6" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
+      
+      // 處理 MISS (擺喺最出圈位置，角度固定喺正上方)
+      if (upperLabel === 'MISS') return { path: null, center: polarToCartesian(0, 0, 103, 0) };
+
       let type = 'S';
       let numStr = label;
-      if (label.startsWith('D') && label !== 'D-Bull') { type = 'D'; numStr = label.substring(1); }
-      if (label.startsWith('T')) { type = 'T'; numStr = label.substring(1); }
+      if (upperLabel.startsWith('D')) { type = 'D'; numStr = label.substring(1); }
+      else if (upperLabel.startsWith('T')) { type = 'T'; numStr = label.substring(1); }
+      
       const num = parseInt(numStr);
       const idx = BOARD_NUMBERS.indexOf(num);
       if (idx === -1) return null;
+      
       const angle = idx * 18;
       let r1, r2, centerR;
       if (type === 'D') { r1 = 80; r2 = 88; centerR = 84; }
       else if (type === 'T') { r1 = 40; r2 = 48; centerR = 44; }
       else { r1 = 48; r2 = 80; centerR = 64; }
+      
       const start = angle - 9;
       const end = angle + 9;
+      
       return {
         path: `<path d="${getWedgePath(0, 0, r1, r2, start, end)}" fill="#ffffff"></path>`,
         center: polarToCartesian(0, 0, centerR, angle)
@@ -284,14 +291,17 @@
         svg += `<line x1="${pInner.x}" y1="${pInner.y}" x2="${pDoubleOuter.x}" y2="${pDoubleOuter.y}" stroke="#ffffff" stroke-width="0.5"></line>`;
         svg += `<line x1="${pDoubleOuter.x}" y1="${pDoubleOuter.y}" x2="${pOutermost.x}" y2="${pOutermost.y}" stroke="#475569" stroke-width="0.5"></line>`;
       }
+      
       if (suggestionTarget) {
         const targetGeom = getTargetGeometry(suggestionTarget);
-        if (targetGeom) svg += targetGeom.path;
+        if (targetGeom && targetGeom.path) svg += targetGeom.path;
       }
+      
       let targetBaseNum = null;
       if (suggestionTarget && !suggestionTarget.includes('Bull')) {
         targetBaseNum = parseInt(suggestionTarget.replace(/[^0-9]/g, ''));
       }
+      
       BOARD_NUMBERS.forEach((num, i) => {
         const angle = i * 18;
         const p = polarToCartesian(0, 0, 95, angle);
@@ -301,17 +311,20 @@
         }
         svg += `<text x="${p.x}" y="${p.y}" fill="${numColor}" font-size="9" font-weight="900" font-family="'Inter', sans-serif" text-anchor="middle" dominant-baseline="central" transform="rotate(${angle}, ${p.x}, ${p.y})">${num}</text>`;
       });
+
       const hitCounts = {};
       if (currentDarts && currentDarts.length > 0) {
-        currentDarts.forEach(dart => {
-          if (dart.label === 'MISS') return;
+        currentDarts.forEach((dart, dIdx) => {
           const targetGeom = getTargetGeometry(dart.label);
           if (targetGeom) {
             hitCounts[dart.label] = (hitCounts[dart.label] || 0) + 1;
-            const offset = (hitCounts[dart.label] - 1) * 3; 
+            // 如果係 MISS，分散開少少位顯示
+            const offset = dart.label === 'MISS' ? (dIdx * 6 - 6) : (hitCounts[dart.label] - 1) * 3; 
             const px = targetGeom.center.x + offset;
-            const py = targetGeom.center.y + offset;
-            const strokeColor = dart.isBust ? "rgba(255,255,255,0.4)" : "#ffffff";
+            const py = targetGeom.center.y + (dart.label === 'MISS' ? 0 : offset);
+            
+            // 顏色：Bust 或 MISS 稍微淡啲
+            const strokeColor = (dart.isBust || dart.label === 'MISS') ? "rgba(255,255,255,0.4)" : "#ffffff";
             svg += `
               <g transform="translate(${px}, ${py})">
                 <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="${strokeColor}" stroke-width="0.8" stroke-linecap="round"></line>
@@ -424,7 +437,7 @@
         }).join('');
         return `
           <div class="flex flex-col items-center justify-end transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-30'}">
-            <div class="text-[clamp(1.2rem,7vw,2.2rem)] font-medium tracking-[0.08em] leading-none mb-1.5 ${gameState.winner === player.name ? 'text-[#967d54]' : 'text-white'}">${player.score}</div>
+            <div class="text-[clamp(1rem,6vw,1.8rem)] font-medium tracking-[0.08em] leading-none mb-1.5 ${gameState.winner === player.name ? 'text-[#967d54]' : 'text-white'}">${player.score}</div>
             <div class="text-[8px] sm:text-[10px] text-neutral-400 font-medium uppercase tracking-[0.1em] mb-2 whitespace-nowrap">${player.name}</div>
             <div class="flex gap-1 w-full justify-center">${dartsHTML}</div>
           </div>
@@ -485,7 +498,7 @@
                 </div>
               </div>
 
-              <div class="flex-1 flex items-start justify-center px-4 pt-0 min-h-0">
+              <div class="flex-1 flex items-center justify-center px-4 pt-0 min-h-0 overflow-hidden">
                 <svg viewBox="-105 -105 210 210" class="h-full w-auto max-w-full pointer-events-none">
                   ${dynamicSVG}
                 </svg>
@@ -494,7 +507,6 @@
 
             <div class="flex-none">
               ${playersCardsHTML}
-              <!-- 增加 mb-4 以防止與下方按鈕貼合 -->
               <div class="mt-4 mb-4 px-4 h-12">${statusBannerHTML}</div>
             </div>
           </main>
