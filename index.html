@@ -43,7 +43,7 @@
     /* 消除按鈕預設點擊高光 */
     button { -webkit-tap-highlight-color: transparent; outline: none; }
     
-    /* 手機版點擊回饋樣式 (取代 hover) */
+    /* 手機版點擊回饋樣式 */
     .tap-active { background-color: #333333 !important; color: #ffffff !important; transition: background-color 0.1s; }
     .key-tap-active { background-color: #ffffff !important; color: #000000 !important; }
   </style>
@@ -346,7 +346,6 @@
               <span class="flex items-center">${routeWithArrows}</span>
             </div>`;
         } else {
-          // READY 用淺色，其他用白色
           const labelColor = lastDartLabel === "READY" ? "text-neutral-500" : "text-white";
           statusBannerHTML = `
             <div class="w-full bg-[#111111] rounded-lg py-3.5 flex items-center justify-between px-6 font-medium text-[12px] tracking-[0.15em] text-neutral-300 uppercase border border-neutral-800">
@@ -447,8 +446,8 @@
 
       const winActionsHTML = gameState.winner ? `
         <div class="flex-1 flex flex-col items-center justify-start pt-4 gap-5 w-full animate-fade-in pb-10">
-          <button class="w-[220px] py-4 rounded-lg border border-neutral-800 text-white font-medium text-xs tracking-[0.15em] uppercase">ROUND HISTORY</button>
-          <button onclick="window.initGame()" class="w-[220px] py-4 rounded-lg bg-white text-black font-medium text-xs tracking-[0.15em] uppercase">RESTART</button>
+          <button class="w-[220px] py-4 rounded-lg border border-neutral-800 text-white font-medium text-xs tracking-[0.15em] uppercase transition-colors">ROUND HISTORY</button>
+          <button onclick="window.initGame()" class="w-[220px] py-4 rounded-lg bg-white text-black font-medium text-xs tracking-[0.15em] uppercase transition-colors">RESTART</button>
         </div>
       ` : '';
 
@@ -478,7 +477,6 @@
 
           <main class="flex-1 flex flex-col min-h-0">
             <div class="flex-1 relative min-h-0 flex flex-col">
-              <!-- Game Info (Top Left) -->
               <div class="absolute top-0 left-5 z-20 pointer-events-none">
                 <div class="text-[10px] text-neutral-400 font-medium tracking-[0.15em] leading-relaxed uppercase">
                   ${settings.gameMode} <span class="mx-1 opacity-50">|</span> ${settings.startingScore}<br>
@@ -487,7 +485,6 @@
                 </div>
               </div>
 
-              <!-- 動態 SVG 飛鏢靶 - 使用 flex-grow 並配合 h-full 自動縮放以適應視窗 -->
               <div class="flex-1 flex items-start justify-center px-4 pt-0 min-h-0">
                 <svg viewBox="-105 -105 210 210" class="h-full w-auto max-w-full pointer-events-none">
                   ${dynamicSVG}
@@ -497,7 +494,8 @@
 
             <div class="flex-none">
               ${playersCardsHTML}
-              <div class="mt-4 px-4 h-12">${statusBannerHTML}</div>
+              <!-- 增加 mb-4 以防止與下方按鈕貼合 -->
+              <div class="mt-4 mb-4 px-4 h-12">${statusBannerHTML}</div>
             </div>
           </main>
 
