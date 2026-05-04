@@ -41,6 +41,7 @@
     
     button { -webkit-tap-highlight-color: transparent; outline: none; }
     
+    /* 手機版點擊回饋 */
     .tap-active { background-color: #333333 !important; color: #ffffff !important; transition: background-color 0.1s; }
     .key-tap-active { background-color: #ffffff !important; color: #000000 !important; }
   </style>
@@ -60,6 +61,7 @@
     // --- 工具函數 ---
     const cloneState = (state) => JSON.parse(JSON.stringify(state));
 
+    // 所有可能的目標，用於計算結算路徑
     const ALL_TARGETS = [
       ...Array.from({length: 20}, (_, i) => 20 - i).map(i => ({v: i*3, l: `T${i}`, out: true})),
       {v: 50, l: 'D-BULL', out: true},
@@ -68,6 +70,7 @@
       ...Array.from({length: 20}, (_, i) => 20 - i).map(i => ({v: i, l: `${i}`, out: false}))
     ];
 
+    // DFS 結算算法
     const calculateCheckoutRoute = (score, dartsLeft, checkoutMode) => {
       if (score > 170 || score <= 0 || dartsLeft <= 0) return null;
       const isMasterOut = checkoutMode === 'Master out';
@@ -250,7 +253,7 @@
       if (upperLabel === 'S-BULL') return { path: `<circle cx="0" cy="0" r="15" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
       if (upperLabel === 'D-BULL') return { path: `<circle cx="0" cy="0" r="6" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
       
-      // 處理 MISS (擺喺最出圈位置，角度固定喺正上方)
+      // 處理 MISS (擺喺 12 點鐘方向外圍)
       if (upperLabel === 'MISS') return { path: null, center: polarToCartesian(0, 0, 103, 0) };
 
       let type = 'S';
@@ -277,8 +280,10 @@
       };
     };
 
+    // 生成標靶 SVG
     const generateDartboardSVG = (currentDarts, suggestionTarget) => {
       let svg = `<circle cx="0" cy="0" r="105" fill="#000000"></circle>`;
+      // 繪製格線
       [88, 80, 48, 40, 15, 6].forEach(r => {
         svg += `<circle cx="0" cy="0" r="${r}" fill="none" stroke="#ffffff" stroke-width="0.5"></circle>`;
       });
@@ -292,38 +297,34 @@
         svg += `<line x1="${pDoubleOuter.x}" y1="${pDoubleOuter.y}" x2="${pOutermost.x}" y2="${pOutermost.y}" stroke="#475569" stroke-width="0.5"></line>`;
       }
       
+      // 建議目標提示
       if (suggestionTarget) {
         const targetGeom = getTargetGeometry(suggestionTarget);
         if (targetGeom && targetGeom.path) svg += targetGeom.path;
       }
       
+      // 繪製數字
       let targetBaseNum = null;
       if (suggestionTarget && !suggestionTarget.includes('Bull')) {
         targetBaseNum = parseInt(suggestionTarget.replace(/[^0-9]/g, ''));
       }
-      
       BOARD_NUMBERS.forEach((num, i) => {
         const angle = i * 18;
         const p = polarToCartesian(0, 0, 95, angle);
-        let numColor = "#ffffff";
-        if (suggestionTarget) {
-          numColor = (targetBaseNum === num) ? "#ffffff" : "#334155";
-        }
+        let numColor = (targetBaseNum === num) ? "#ffffff" : (suggestionTarget ? "#334155" : "#ffffff");
         svg += `<text x="${p.x}" y="${p.y}" fill="${numColor}" font-size="9" font-weight="900" font-family="'Inter', sans-serif" text-anchor="middle" dominant-baseline="central" transform="rotate(${angle}, ${p.x}, ${p.y})">${num}</text>`;
       });
 
+      // 繪製落點 (X)
       const hitCounts = {};
       if (currentDarts && currentDarts.length > 0) {
         currentDarts.forEach((dart, dIdx) => {
           const targetGeom = getTargetGeometry(dart.label);
           if (targetGeom) {
             hitCounts[dart.label] = (hitCounts[dart.label] || 0) + 1;
-            // 如果係 MISS，分散開少少位顯示
             const offset = dart.label === 'MISS' ? (dIdx * 6 - 6) : (hitCounts[dart.label] - 1) * 3; 
             const px = targetGeom.center.x + offset;
             const py = targetGeom.center.y + (dart.label === 'MISS' ? 0 : offset);
-            
-            // 顏色：Bust 或 MISS 稍微淡啲
             const strokeColor = (dart.isBust || dart.label === 'MISS') ? "rgba(255,255,255,0.4)" : "#ffffff";
             svg += `
               <g transform="translate(${px}, ${py})">
@@ -344,6 +345,7 @@
       let statusBannerHTML = '';
       let nextTarget = null;
       
+      // 狀態列顯示邏輯
       if (gameState.winner) {
         statusBannerHTML = `<div class="w-full bg-[#967d54] rounded-lg py-3.5 flex items-center justify-center font-bold text-[13px] tracking-[0.15em] text-white uppercase animate-pulse shadow-lg">${gameState.winner} WIN!!!</div>`;
       } else if (gameState.isBust) {
@@ -369,9 +371,10 @@
       }
 
       const dynamicSVG = generateDartboardSVG(gameState.currentTurnDarts, nextTarget);
-      const menuAnimationClass = menuJustOpened ? 'animate-fade-in' : '';
+      
+      // 選單渲染
       const menuHTML = isMenuOpen ? `
-        <div class="fixed inset-0 z-50 bg-black flex flex-col px-6 py-8 overflow-y-auto ${menuAnimationClass}">
+        <div class="fixed inset-0 z-50 bg-black flex flex-col px-6 py-8 overflow-y-auto ${menuJustOpened ? 'animate-fade-in' : ''}">
           <div class="flex justify-between items-center mb-8 shrink-0">
             <img src="./assets/Logo.svg" alt="Target" class="h-[19px] object-contain opacity-90">
             <button onclick="window.cancelMenu()" class="text-white text-[11px] font-medium tracking-[0.15em] uppercase hover:text-neutral-300 transition-colors">CANCEL</button>
@@ -422,6 +425,7 @@
         </div>
       ` : '';
 
+      // 玩家資訊卡渲染
       const gridColsClass = `grid-cols-${settings.playerCount}`;
       const playersCardsHTML = `<div class="grid ${gridColsClass} gap-2 px-4 w-full">` + gameState.players.map((player, idx) => {
         const isActive = idx === gameState.currentPlayerIndex && !gameState.winner;
@@ -430,9 +434,7 @@
           let boxClass = 'border-neutral-800 text-neutral-600'; 
           if (isActive) { boxClass = dart ? 'border-white text-white' : 'border-neutral-500'; }
           else if (dart) { boxClass = 'border-neutral-600 text-neutral-400'; }
-          let content = '';
-          if (dart) { content = dart.isBust ? 'X' : (dart.points || dart.label); }
-          else if (isActive && dartIdx === gameState.currentTurnDarts.length) { content = `<div class="w-1.5 h-1.5 bg-white rounded-full"></div>`; }
+          let content = dart ? (dart.isBust ? 'X' : (dart.points || dart.label)) : (isActive && dartIdx === gameState.currentTurnDarts.length ? `<div class="w-1.5 h-1.5 bg-white rounded-full"></div>` : '');
           return `<div class="flex-1 aspect-square max-w-[28px] max-h-[28px] rounded border ${boxClass} flex items-center justify-center text-[10px] font-medium uppercase overflow-hidden">${content}</div>`;
         }).join('');
         return `
@@ -444,6 +446,7 @@
         `;
       }).join('') + `</div>`;
 
+      // 鍵盤渲染
       const isInputDisabled = !!gameState.winner || gameState.isBust || gameState.currentTurnDarts.length >= 3;
       const disableAttr = isInputDisabled ? 'disabled="disabled" style="opacity:0.4"' : '';
       const numKeys = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
@@ -457,12 +460,12 @@
         </div>
       `).join('');
 
-      const winActionsHTML = gameState.winner ? `
+      const winActionsHTML = `
         <div class="flex-1 flex flex-col items-center justify-start pt-4 gap-5 w-full animate-fade-in pb-10">
           <button class="w-[220px] py-4 rounded-lg border border-neutral-800 text-white font-medium text-xs tracking-[0.15em] uppercase transition-colors">ROUND HISTORY</button>
           <button onclick="window.initGame()" class="w-[220px] py-4 rounded-lg bg-white text-black font-medium text-xs tracking-[0.15em] uppercase transition-colors">RESTART</button>
         </div>
-      ` : '';
+      `;
 
       const controlPanelHTML = gameState.winner ? winActionsHTML : `
         <div class="flex-none bg-black">
@@ -478,7 +481,6 @@
       appDiv.innerHTML = `
         ${menuHTML}
         <div class="max-w-md mx-auto w-full bg-black relative flex flex-col h-full overflow-hidden">
-          
           <header class="flex-none pt-6 pb-2 px-5 flex items-start justify-between sticky top-0 bg-black/95 backdrop-blur z-30">
             <div class="flex items-start"><img src="./assets/Logo.svg" alt="Target" class="h-[19px] object-contain opacity-90"></div>
             <div class="flex items-start gap-5">
