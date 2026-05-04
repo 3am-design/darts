@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>TARGET Darts Scoreboard</title>
+  <!-- 引入 Google Fonts (Inter) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+  <!-- 引入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* 隱藏滾動條 */
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    /* 動畫效果 */
+    @keyframes slideRight { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+    .animate-slide-right { animation: slideRight 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+
+    /* 全局設定 */
+    body { 
+      overscroll-behavior-y: none; 
+      background-color: #000000; 
+      font-family: 'Inter', sans-serif;
+      color: #ffffff;
+    }
+    
+    /* 消除按鈕點擊時的藍色高光 */
+    button { -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body class="bg-black selection:bg-white/30">
+
+  <div id="app"></div>
+
+  <script>
+    // --- 系統常數 ---
+    const GAME_MODES = ['X01', 'S-BULL']; 
+    const STARTING_SCORES = [301, 501, 701, 901, 1101, 1501];
+    const CHECKOUT_MODES = ['Single out', 'Master out', 'Double out'];
+    const PLAYER_COUNTS = [1, 2, 3, 4];
+    const BOARD_NUMBERS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+
+    // --- 工具函數 ---
+    const cloneState = (state) => JSON.parse(JSON.stringify(state));
+
+    // --- DFS 結算路線算法 ---
+    const ALL_TARGETS = [
+      ...Array.from({length: 20}, (_, i) => 20 - i).map(i => ({v: i*3, l: `T${i}`, out: true})),
+      {v: 50, l: 'D-Bull', out: true},
+      ...[20,16,8,4,10,5,12,6,18,9,14,7,19,17,15,13,11,3,2,1].map(i => ({v: i*2, l: `D${i}`, out: true})),
+      {v: 25, l: 'S-Bull', out: false},
+      ...Array.from({length: 20}, (_, i) => 20 - i).map(i => ({v: i, l: `${i}`, out: false}))
+    ];
+
+    const calculateCheckoutRoute = (score, dartsLeft, checkoutMode) => {
+      if (score > 170 || score <= 0 || dartsLeft <= 0) return null;
+      const isMasterOut = checkoutMode === 'Master out';
+      const isDoubleOut = checkoutMode === 'Double out';
+      
+      const dfs = (remScore, remDarts, path) => {
+        if (remScore === 0) {
+          if (isDoubleOut) return (path[path.length - 1].l.startsWith('D')) ? path.map(p => p.l) : null;
+          if (isMasterOut) return path[path.length - 1].out ? path.map(p => p.l) : null;
+          return path.map(p => p.l);
+        }
+        if (remScore < 0 || remDarts === 0) return null;
+        if ((isMasterOut || isDoubleOut) && remScore === 1) return null;
+
+        for (let t of ALL_TARGETS) {
+          if (remDarts === 1) {
+             if (isDoubleOut && !t.l.startsWith('D')) continue;
+             if (isMasterOut && !t.out) continue;
+          }
+          if (remScore - t.v > (remDarts - 1) * 60) continue;
+          const res = dfs(remScore - t.v, remDarts - 1, [...path, t]);
+          if (res) return res;
+        }
+        return null;
+      };
+      return dfs(score, dartsLeft, []);
+    };
+
+    // --- 應用程式狀態 ---
+    let isMenuOpen = false;
+    let menuJustOpened = false; // 控制淡入動畫，避免點擊選項時閃爍
+    let settings = { gameMode: 'X01', startingScore: 501, checkoutMode: 'Master out', playerCount: 2 };
+    let pendingSettings = null; // 用於 Menu 的暫存設定
+    let gameState = null;
+    let historyStack = [];
+    let timeoutRef = null;
+
+    // --- 核心邏輯 ---
+    // 打開 Menu 時，複製當前設定為暫存設定，並觸發一次性動畫
+    window.openMenu = () => { 
+      pendingSettings = cloneState(settings);
+      isMenuOpen = true; 
+      menuJustOpened = true; 
+      render(); 
+      menuJustOpened = false; // 渲染後立即關閉動畫標記
+    };
+
+    // 關閉 Menu 時，直接捨棄暫存設定 (無縫返回)
+    window.cancelMenu = () => {
+      isMenuOpen = false;
+      render();
+    }
+
+    // 在 Menu 內修改設定時，只修改暫存草稿，不會重啟遊戲
+    window.setSetting = (key, value) => { 
+      if (pendingSettings) pendingSettings[key] = value; 
+      render(); 
+    };
+    
+    window.initGame = () => {
+      if (timeoutRef) clearTimeout(timeoutRef);
+      
+      // 如果從 Menu 按下 New Game，才正式套用暫存設定
+      if (isMenuOpen && pendingSettings) {
+        settings = cloneState(pendingSettings);
+      }
+
+      const players = Array.from({ length: settings.playerCount }).map((_, i) => ({
+        id: i + 1, name: `Player ${i + 1}`, score: settings.startingScore, lastRoundScore: null, dartsThrown: 0, roundDarts: []
+      }));
+      gameState = { players, currentPlayerIndex: 0, currentRound: 1, currentTurnDarts: [], turnStartScore: settings.startingScore, winner: null, isBust: false };
+      historyStack = [];
+      isMenuOpen = false;
+      render();
+    };
+
+    window.handleUndo = () => {
+      if (historyStack.length === 0) return;
+      if (timeoutRef) { clearTimeout(timeoutRef); timeoutRef = null; }
+      gameState = historyStack.pop();
+      render();
+    };
+
+    window.handleThrow = (score, multiplier, label) => {
+      if (!gameState || gameState.winner || gameState.isBust || gameState.currentTurnDarts.length >= 3) return;
+      if (timeoutRef) clearTimeout(timeoutRef);
+      historyStack.push(cloneState(gameState));
+
+      const points = score * multiplier;
+      const player = gameState.players[gameState.currentPlayerIndex];
+      const newScore = player.score - points;
+      
+      let isBust = false, isWin = false;
+
+      if (newScore < 0) { isBust = true; } 
+      else if (newScore === 0) {
+        if (settings.checkoutMode === 'Master out') {
+          if (multiplier > 1 || (score === 50 && multiplier === 1)) isWin = true; else isBust = true;
+        } else if (settings.checkoutMode === 'Double out') {
+           if (multiplier === 2 || (score === 50 && multiplier === 1)) isWin = true; else isBust = true;
+        } else {
+           isWin = true; // Single out
+        }
+      } else if (newScore === 1 && (settings.checkoutMode === 'Master out' || settings.checkoutMode === 'Double out')) { 
+        isBust = true; 
+      }
+
+      const newDart = { label, points, multiplier, isBust };
+      gameState.currentTurnDarts.push(newDart);
+      // 同步更新玩家今 Round 嘅飛鏢紀錄
+      gameState.players[gameState.currentPlayerIndex].roundDarts = [...gameState.currentTurnDarts];
+
+      if (isWin) {
+        gameState.players[gameState.currentPlayerIndex].score = 0;
+        gameState.winner = gameState.players[gameState.currentPlayerIndex].name;
+      } else if (isBust) {
+        gameState.isBust = true;
+        gameState.players[gameState.currentPlayerIndex].score = gameState.turnStartScore;
+        timeoutRef = setTimeout(() => { window.advanceTurn(); }, 1200);
+      } else {
+        gameState.players[gameState.currentPlayerIndex].score = newScore;
+        if (gameState.currentTurnDarts.length === 3) {
+          timeoutRef = setTimeout(() => { window.advanceTurn(); }, 1000);
+        }
+      }
+      render();
+    };
+
+    window.advanceTurn = () => {
+      const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+      currentPlayer.lastRoundScore = gameState.isBust ? 0 : gameState.currentTurnDarts.reduce((acc, dart) => acc + dart.points, 0);
+      
+      gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % settings.playerCount;
+      gameState.currentTurnDarts = [];
+      gameState.isBust = false;
+      gameState.turnStartScore = gameState.players[gameState.currentPlayerIndex].score;
+      
+      // 如果回到 Player 1，代表新一 Round 開始，清空所有人嘅 Round 紀錄
+      if (gameState.currentPlayerIndex === 0) {
+        gameState.currentRound += 1;
+        gameState.players.forEach(p => p.roundDarts = []);
+      }
+      
+      render();
+    };
+
+    // --- 動態飛鏢靶 SVG 生成工具 ---
+    const polarToCartesian = (cx, cy, r, angleInDegrees) => {
+      const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+      return { x: cx + (r * Math.cos(angleInRadians)), y: cy + (r * Math.sin(angleInRadians)) };
+    };
+
+    const getWedgePath = (cx, cy, r1, r2, startAngle, endAngle) => {
+      const start1 = polarToCartesian(cx, cy, r1, endAngle);
+      const end1 = polarToCartesian(cx, cy, r1, startAngle);
+      const start2 = polarToCartesian(cx, cy, r2, endAngle);
+      const end2 = polarToCartesian(cx, cy, r2, startAngle);
+      const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
+      return `M ${start1.x} ${start1.y} A ${r1} ${r1} 0 ${largeArcFlag} 0 ${end1.x} ${end1.y} L ${end2.x} ${end2.y} A ${r2} ${r2} 0 ${largeArcFlag} 1 ${start2.x} ${start2.y} Z`;
+    };
+
+    const getTargetGeometry = (label) => {
+      if (!label || label === 'MISS') return null;
+      if (label === 'S-Bull') return { path: `<circle cx="0" cy="0" r="15" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
+      if (label === 'D-Bull') return { path: `<circle cx="0" cy="0" r="6" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
+
+      let type = 'S';
+      let numStr = label;
+      if (label.startsWith('D') && label !== 'D-Bull') { type = 'D'; numStr = label.substring(1); }
+      if (label.startsWith('T')) { type = 'T'; numStr = label.substring(1); }
+      
+      const num = parseInt(numStr);
+      const idx = BOARD_NUMBERS.indexOf(num);
+      if (idx === -1) return null;
+      
+      const angle = idx * 18;
+      let r1, r2, centerR;
+      if (type === 'D') { r1 = 80; r2 = 88; centerR = 84; }
+      else if (type === 'T') { r1 = 40; r2 = 48; centerR = 44; }
+      else { r1 = 48; r2 = 80; centerR = 64; }
+
+      const start = angle - 9;
+      const end = angle + 9;
+      
+      return {
+        path: `<path d="${getWedgePath(0, 0, r1, r2, start, end)}" fill="#ffffff"></path>`,
+        center: polarToCartesian(0, 0, centerR, angle)
+      };
+    };
+
+    const generateDartboardSVG = (currentDarts, suggestionTarget) => {
+      let svg = `<circle cx="0" cy="0" r="105" fill="#000000"></circle>`;
+      
+      // 內圈得分區 (白線)
+      [88, 80, 48, 40, 15, 6].forEach(r => {
+        svg += `<circle cx="0" cy="0" r="${r}" fill="none" stroke="#ffffff" stroke-width="0.5"></circle>`;
+      });
+      // 外圈數字區 (深灰線)
+      svg += `<circle cx="0" cy="0" r="102" fill="none" stroke="#475569" stroke-width="0.5"></circle>`;
+
+      // 放射狀直線
+      for(let i=0; i<20; i++) {
+        const angle = i * 18 + 9;
+        const pInner = polarToCartesian(0, 0, 15, angle);
+        const pDoubleOuter = polarToCartesian(0, 0, 88, angle);
+        const pOutermost = polarToCartesian(0, 0, 102, angle);
+        
+        svg += `<line x1="${pInner.x}" y1="${pInner.y}" x2="${pDoubleOuter.x}" y2="${pDoubleOuter.y}" stroke="#ffffff" stroke-width="0.5"></line>`;
+        svg += `<line x1="${pDoubleOuter.x}" y1="${pDoubleOuter.y}" x2="${pOutermost.x}" y2="${pOutermost.y}" stroke="#475569" stroke-width="0.5"></line>`;
+      }
+
+      // 高亮目標
+      if (suggestionTarget) {
+        const targetGeom = getTargetGeometry(suggestionTarget);
+        if (targetGeom) svg += targetGeom.path;
+      }
+      
+      // 提取目標的基礎數字 (例如 'T20' -> 20, 'D16' -> 16)
+      let targetBaseNum = null;
+      if (suggestionTarget && !suggestionTarget.includes('Bull')) {
+        targetBaseNum = parseInt(suggestionTarget.replace(/[^0-9]/g, ''));
+      }
+
+      // 數字
+      BOARD_NUMBERS.forEach((num, i) => {
+        const angle = i * 18;
+        const p = polarToCartesian(0, 0, 95, angle);
+        
+        // 判斷顏色：如果有建議目標，只亮起目標數字，其他變暗
+        let numColor = "#ffffff";
+        if (suggestionTarget) {
+          if (targetBaseNum === num) {
+            numColor = "#ffffff"; // 目標數字亮白
+          } else {
+            numColor = "#334155"; // 其他數字變淡 (深灰)
+          }
+        }
+        
+        svg += `<text x="${p.x}" y="${p.y}" fill="${numColor}" font-size="9" font-weight="900" font-family="'Inter', sans-serif" text-anchor="middle" dominant-baseline="central" transform="rotate(${angle}, ${p.x}, ${p.y})">${num}</text>`;
+      });
+
+      // 中鏢 'X'
+      const hitCounts = {};
+      if (currentDarts && currentDarts.length > 0) {
+        currentDarts.forEach(dart => {
+          if (dart.label === 'MISS') return;
+          const targetGeom = getTargetGeometry(dart.label);
+          if (targetGeom) {
+            hitCounts[dart.label] = (hitCounts[dart.label] || 0) + 1;
+            const offset = (hitCounts[dart.label] - 1) * 3; 
+            const px = targetGeom.center.x + offset;
+            const py = targetGeom.center.y + offset;
+            const strokeColor = dart.isBust ? "rgba(255,255,255,0.4)" : "#ffffff";
+            
+            svg += `
+              <g transform="translate(${px}, ${py})">
+                <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="${strokeColor}" stroke-width="0.8" stroke-linecap="round"></line>
+                <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="${strokeColor}" stroke-width="0.8" stroke-linecap="round"></line>
+              </g>
+            `;
+          }
+        });
+      }
+      return svg;
+    };
+
+
+    // --- 渲染畫面 ---
+    function render() {
+      if (!gameState) return;
+      const appDiv = document.getElementById('app');
+
+      // 預判 Checkout 路線
+      let statusBannerHTML = '';
+      let nextTarget = null;
+      
+      if (gameState.winner) {
+        statusBannerHTML = `<div class="w-full bg-[#967d54] rounded-lg py-3.5 flex items-center justify-center font-bold text-[13px] tracking-[0.15em] text-white uppercase animate-pulse shadow-lg">
+          ${gameState.winner} WIN!!!
+        </div>`;
+      } else if (gameState.isBust) {
+        statusBannerHTML = `<div class="w-full bg-[#6a0404] rounded-lg py-3.5 flex items-center justify-center font-bold text-[13px] tracking-[0.15em] text-white uppercase shadow-lg">
+          BUST
+        </div>`;
+      } else {
+        const route = calculateCheckoutRoute(gameState.players[gameState.currentPlayerIndex].score, 3 - gameState.currentTurnDarts.length, settings.checkoutMode);
+        if (route) {
+          nextTarget = route[0];
+          const routeWithArrows = route.join(` <img src="./assets/arrow.svg" alt="->" class="h-[8px] inline-block mx-1.5 opacity-60"> `);
+          statusBannerHTML = `
+            <div class="w-full bg-white rounded-lg py-3 px-4 flex justify-between items-center font-bold text-[13px] tracking-[0.15em] text-black uppercase animate-fade-in shadow-[0_0_15px_rgba(255,255,255,0.15)]">
+              <span>TARGET</span>
+              <span class="flex items-center">${routeWithArrows}</span>
+            </div>`;
+        } else {
+          statusBannerHTML = `<div class="w-full bg-[#111111] rounded-lg py-3.5 flex items-center justify-center font-medium text-[12px] tracking-[0.15em] text-neutral-300 uppercase border border-neutral-800">
+            TURN. ${gameState.players[gameState.currentPlayerIndex].name}
+          </div>`;
+        }
+      }
+
+      const dynamicSVG = generateDartboardSVG(gameState.currentTurnDarts, nextTarget);
+
+      // --- Menu HTML (全螢幕高級設定頁面) ---
+      const menuAnimationClass = menuJustOpened ? 'animate-fade-in' : '';
+      const menuHTML = isMenuOpen ? `
+        <div class="fixed inset-0 z-50 bg-black flex flex-col px-6 py-8 overflow-y-auto ${menuAnimationClass}">
+          
+          <!-- Header -->
+          <div class="flex justify-between items-center mb-8 shrink-0">
+            <img src="./assets/Logo.svg" alt="Target" class="h-[19px] object-contain opacity-90">
+            <button onclick="window.cancelMenu()" class="text-white text-[11px] font-medium tracking-[0.15em] uppercase hover:text-neutral-300 transition-colors">CANCEL</button>
+          </div>
+
+          <!-- Scrollable Content -->
+          <div class="flex-1 flex flex-col items-center justify-center gap-10 pb-10">
+            
+            <!-- GAME MODE -->
+            <div class="w-full max-w-[340px] flex flex-col items-center gap-4">
+              <div class="text-neutral-500 text-[10px] font-medium tracking-[0.15em] uppercase">GAME MODE</div>
+              <div class="flex w-full gap-2">
+                ${GAME_MODES.map(m => {
+                  const activeClass = pendingSettings.gameMode === m ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900';
+                  return `<button onclick="window.setSetting('gameMode', '${m}')" class="flex-1 py-3.5 rounded-lg text-[11px] tracking-[0.15em] uppercase transition-all ${activeClass}">${m}</button>`;
+                }).join('')}
+              </div>
+            </div>
+
+            <!-- START SCORE -->
+            <div class="w-full max-w-[340px] flex flex-col items-center gap-4">
+              <div class="text-neutral-500 text-[10px] font-medium tracking-[0.15em] uppercase">START SCORE</div>
+              <div class="flex flex-wrap justify-center w-full gap-2">
+                ${STARTING_SCORES.map(s => {
+                  const activeClass = pendingSettings.startingScore === s ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900';
+                  return `<button onclick="window.setSetting('startingScore', ${s})" style="flex: 0 0 calc(25% - 6px);" class="py-3.5 rounded-lg text-[11px] tracking-[0.15em] uppercase transition-all ${activeClass}">${s}</button>`;
+                }).join('')}
+              </div>
+            </div>
+
+            <!-- CHECKOUT -->
+            <div class="w-full max-w-[340px] flex flex-col items-center gap-4">
+              <div class="text-neutral-500 text-[10px] font-medium tracking-[0.15em] uppercase">CHECKOUT</div>
+              <div class="flex w-full gap-2">
+                ${CHECKOUT_MODES.map(m => {
+                  const label = m.replace(' out', '').toUpperCase();
+                  const isActive = pendingSettings.checkoutMode === m;
+                  const activeClass = isActive ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900';
+                  return `<button onclick="window.setSetting('checkoutMode', '${m}')" class="flex-1 py-3.5 rounded-lg text-[11px] tracking-[0.15em] uppercase transition-all ${activeClass}">${label}</button>`;
+                }).join('')}
+              </div>
+            </div>
+
+            <!-- PLAYERS -->
+            <div class="w-full max-w-[340px] flex flex-col items-center gap-4">
+              <div class="text-neutral-500 text-[10px] font-medium tracking-[0.15em] uppercase">PLAYERS</div>
+              <div class="flex w-full gap-2">
+                ${PLAYER_COUNTS.map(p => {
+                  const activeClass = pendingSettings.playerCount === p ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900';
+                  return `<button onclick="window.setSetting('playerCount', ${p})" class="flex-1 py-3.5 rounded-lg text-[11px] tracking-[0.15em] uppercase transition-all ${activeClass}">${p}</button>`;
+                }).join('')}
+              </div>
+            </div>
+
+            <!-- NEW GAME BUTTON -->
+            <div class="w-full max-w-[340px] mt-2">
+              <button onclick="window.initGame()" class="w-full bg-white hover:bg-neutral-200 text-black py-4 rounded-lg font-bold tracking-[0.15em] text-[12px] uppercase transition-all active:scale-95">
+                NEW GAME
+              </button>
+            </div>
+
+          </div>
+        </div>
+      ` : '';
+
+      // --- Players Section ---
+      const gridColsClass = `grid-cols-${settings.playerCount}`;
+      const playersCardsHTML = `<div class="grid ${gridColsClass} gap-2 px-4 w-full">` + gameState.players.map((player, idx) => {
+        const isActive = idx === gameState.currentPlayerIndex && !gameState.winner;
+        let dartsHTML = [0, 1, 2].map(dartIdx => {
+          const dart = player.roundDarts[dartIdx];
+          let boxClass = 'border-neutral-800 text-neutral-600'; 
+          if (isActive) { boxClass = dart ? 'border-white text-white' : 'border-neutral-500'; }
+          else if (dart) { boxClass = 'border-neutral-600 text-neutral-400'; }
+          let content = '';
+          if (dart) { content = dart.isBust ? 'X' : (dart.points || dart.label); }
+          else if (isActive && dartIdx === gameState.currentTurnDarts.length) { content = `<div class="w-1.5 h-1.5 bg-white rounded-full"></div>`; }
+          return `<div class="flex-1 aspect-square max-w-[28px] max-h-[28px] rounded border ${boxClass} flex items-center justify-center text-[10px] font-medium uppercase overflow-hidden">${content}</div>`;
+        }).join('');
+        return `
+          <div class="flex flex-col items-center justify-end transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-30'}">
+            <div class="text-[clamp(1.5rem,8vw,2.5rem)] font-medium tracking-[0.08em] leading-none mb-1.5 ${gameState.winner === player.name ? 'text-[#967d54]' : 'text-white'}">${player.score}</div>
+            <div class="text-[8px] sm:text-[10px] text-neutral-400 font-medium uppercase tracking-[0.1em] mb-2 whitespace-nowrap">${player.name}</div>
+            <div class="flex gap-1 w-full justify-center">${dartsHTML}</div>
+          </div>
+        `;
+      }).join('') + `</div>`;
+
+      // --- Keypad Section ---
+      const isInputDisabled = !!gameState.winner || gameState.isBust || gameState.currentTurnDarts.length >= 3;
+      const disableAttr = isInputDisabled ? 'disabled="disabled" style="opacity:0.4"' : '';
+      const numKeys = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+      const keypadHTML = numKeys.map(num => `
+        <div class="bg-black rounded-lg overflow-hidden flex flex-col border border-neutral-800 h-[60px] sm:h-[68px]">
+          <button onclick="window.handleThrow(${num}, 1, '${num}')" ${disableAttr} class="flex-1 text-[16px] font-medium text-white hover:bg-neutral-900 active:bg-neutral-800 transition-colors">
+            ${num}
+          </button>
+          <div class="flex h-[28px] sm:h-[32px] border-t border-neutral-800">
+            <button onclick="window.handleThrow(${num}, 2, 'D${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-black border-r border-neutral-800 hover:bg-neutral-900 active:text-white transition-colors">D</button>
+            <button onclick="window.handleThrow(${num}, 3, 'T${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-black hover:bg-neutral-900 active:text-white transition-colors">T</button>
+          </div>
+        </div>
+      `).join('');
+
+      const winActionsHTML = gameState.winner ? `
+        <div class="flex-1 flex flex-col items-center justify-start pt-8 gap-5 w-full animate-fade-in pb-10">
+          <button class="w-[220px] py-4 rounded-lg border border-neutral-800 text-white font-medium text-xs tracking-[0.15em] uppercase hover:bg-neutral-900 transition-colors">ROUND HISTORY</button>
+          <button onclick="window.initGame()" class="w-[220px] py-4 rounded-lg bg-white text-black font-medium text-xs tracking-[0.15em] uppercase hover:bg-neutral-200 transition-colors">RESTART</button>
+        </div>
+      ` : '';
+
+      const controlPanelHTML = gameState.winner ? winActionsHTML : `
+        <div class="flex gap-2 mb-2 px-4">
+          <button onclick="window.handleThrow(25, 1, 'S-Bull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 hover:bg-neutral-900 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase transition-all">S-BULL</button>
+          <button onclick="window.handleThrow(50, 1, 'D-Bull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 hover:bg-neutral-900 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase transition-all">D-BULL</button>
+          <button onclick="window.handleThrow(0, 1, 'MISS')" ${disableAttr} class="w-[72px] bg-black border border-neutral-800 hover:bg-neutral-900 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase transition-all">MISS</button>
+        </div>
+        <div class="grid grid-cols-5 gap-2 px-4 pb-6 overflow-y-auto hide-scrollbar">${keypadHTML}</div>
+      `;
+
+      // 輸出整體 HTML
+      appDiv.innerHTML = `
+        ${menuHTML}
+        <div class="max-w-md mx-auto w-full bg-black relative flex flex-col h-screen overflow-y-auto overflow-x-hidden">
+          
+          <header class="pt-6 pb-2 px-5 flex items-start justify-between sticky top-0 bg-black/95 backdrop-blur z-30">
+            <div class="flex items-start"><img src="./assets/Logo.svg" alt="Target" class="h-[19px] object-contain opacity-90"></div>
+            <div class="flex items-start gap-5">
+              <button onclick="window.openMenu()" class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/setting.svg" alt="Settings" class="h-[12px] object-contain"></button>
+              <button onclick="alert('History Record (Coming soon)')" class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/record.svg" alt="Record" class="h-[15px] object-contain"></button>
+              <button onclick="window.handleUndo()" ${historyStack.length === 0 ? 'disabled style="opacity:0.2"' : ''} class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/back.svg" alt="Undo" class="h-[13px] object-contain"></button>
+            </div>
+          </header>
+
+          <div class="flex-none pb-2">
+            <div class="relative px-5">
+              <!-- Game Info (Top Left) - 使用 Absolute 置頂 -->
+              <div class="absolute top-0 left-5 z-20">
+                <div class="text-[10px] text-neutral-400 font-medium tracking-[0.15em] leading-relaxed uppercase">
+                  ${settings.gameMode} <span class="mx-1 opacity-50">|</span> ${settings.startingScore}<br>
+                  ROUND ${gameState.currentRound}
+                </div>
+              </div>
+
+              <!-- 動態 SVG 飛鏢靶 - 上移對齊文字頂部 -->
+              <div class="flex justify-center mb-3 px-4 pt-0">
+                <svg viewBox="-105 -105 210 210" class="w-full max-w-[340px] h-auto pointer-events-none">
+                  ${dynamicSVG}
+                </svg>
+              </div>
+            </div>
+
+            ${playersCardsHTML}
+            <div class="mt-3 px-4 h-12">${statusBannerHTML}</div>
+          </div>
+
+          <div class="flex-1 flex flex-col justify-end bg-black">${controlPanelHTML}</div>
+        </div>
+      `;
+    }
+
+    window.onload = () => { window.initGame(); };
+  </script>
+</body>
+</html>
