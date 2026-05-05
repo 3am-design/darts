@@ -4,6 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>TARGET Darts</title>
+  
+  <!-- ========================================== -->
+  <!-- iOS PWA (Web App) 專用設定                  -->
+  <!-- ========================================== -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- 設定頂部 Status Bar 顏色，black-translucent 可以令網頁伸展到頂部 -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TARGET Darts">
+  <!-- 加入主畫面時嘅 App Icon (建議用 192x192 嘅正方形圖片) -->
+  <link rel="apple-touch-icon" href="./assets/Logo.svg">
+  <!-- 隱藏 Safari UI -->
+  <meta name="mobile-web-app-capable" content="yes">
+  
   <!-- 引入 Google Fonts (Inter) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -39,6 +52,9 @@
       margin: 0;
       /* 關鍵：防止雙擊放大，同時保留單擊同埋手勢 */
       touch-action: manipulation;
+      /* 禁止用家選取文字，令感覺更似 App */
+      user-select: none;
+      -webkit-user-select: none;
     }
     
     /* 使用 dvh (Dynamic Viewport Height) 確保在 Safari 工具列出現時自動縮放 */
