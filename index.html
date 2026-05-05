@@ -454,7 +454,7 @@
       let svg = `
         <defs>
           <filter id="ghostTint" color-interpolation-filters="sRGB">
-            <feFlood flood-color="#475569" result="flood" />
+            <feFlood flood-color="#1479FA" result="flood" />
             <feComposite in="flood" in2="SourceAlpha" operator="in" />
           </filter>
         </defs>
@@ -530,8 +530,8 @@
           }
           hitsSVG += `
             <g transform="translate(${px}, ${py})">
-              <!-- 使用 ghostTint filter 染成 #475569，設定 80% opacity -->
-              <image href="./assets/x.svg" x="-3" y="-3" width="6" height="6" filter="url(#ghostTint)" opacity="0.8" />
+              <!-- 使用 ghostTint filter 染成 #1479FA，設定 100% opacity -->
+              <image href="./assets/x.svg" x="-3" y="-3" width="6" height="6" filter="url(#ghostTint)" opacity="1" />
             </g>`;
         });
       }
