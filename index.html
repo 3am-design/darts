@@ -521,7 +521,8 @@
           }
           hitsSVG += `
             <g transform="translate(${px}, ${py})">
-              <image href="./assets/x.svg" x="-3" y="-3" width="6" height="6" opacity="0.3" />
+              <!-- 將 opacity 調整為 0.08 -->
+              <image href="./assets/x.svg" x="-3" y="-3" width="6" height="6" opacity="0.08" />
             </g>`;
         });
       }
@@ -815,6 +816,7 @@
         </div>
       `;
 
+      // 將 BULL 同 MISS 都轉用 handleKeyClick
       const controlPanelHTML = gameState.winner ? winActionsHTML : `
         <div class="flex-none bg-black">
           <div class="flex gap-2 lg:gap-3 mb-2 lg:mb-3 px-4 lg:px-6">
@@ -853,9 +855,9 @@
           <main class="flex-1 w-full max-w-md lg:max-w-[1200px] mx-auto flex flex-col lg:flex-row min-h-0 relative z-10">
             
             <div class="flex-1 relative min-h-0 flex flex-col lg:justify-center lg:py-8 lg:pr-8">
-              <!-- 終極黃金比例：固定 scale-[1.15] 及向上微調，保證安全距離 -->
+              <!-- 標靶容器，修正 Chrome 放大的 Bug：將 lg:w-auto 改為 lg:w-full，並加上 lg:max-h-[80vh] 強制限制最大高度 -->
               <div class="flex-1 flex items-center justify-center pb-2 lg:pb-0 w-full h-full min-h-0 overflow-visible">
-                <svg viewBox="-105 -105 210 210" class="w-full max-w-[460px] lg:max-w-none lg:w-auto h-auto max-h-full lg:h-full scale-[1.15] lg:scale-100 transition-transform origin-center lg:origin-center -translate-y-1 lg:translate-y-0">
+                <svg viewBox="-105 -105 210 210" class="w-full max-w-[460px] lg:max-w-full lg:w-full h-auto max-h-full lg:h-full lg:max-h-[80vh] scale-[1.15] lg:scale-100 transition-transform origin-center lg:origin-center -translate-y-1 lg:translate-y-0">
                   ${dynamicSVG}
                 </svg>
               </div>
