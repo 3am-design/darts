@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>TARGET Darts Scoreboard</title>
+  <title>TARGET Darts</title>
   <!-- 引入 Google Fonts (Inter) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -133,6 +133,7 @@
     // --- 應用程式狀態 ---
     let isMenuOpen = false;
     let menuJustOpened = false;
+    let isRecordOpen = false;
     let settings = { gameMode: 'X01', startingScore: 501, checkoutMode: 'Master out', playerCount: 2 };
     let pendingSettings = null;
     let gameState = null;
@@ -154,6 +155,11 @@
       render();
     }
 
+    window.toggleRecord = () => {
+      isRecordOpen = !isRecordOpen;
+      render();
+    };
+
     window.setSetting = (key, value) => { 
       if (pendingSettings) pendingSettings[key] = value; 
       render(); 
@@ -167,10 +173,11 @@
       const players = Array.from({ length: settings.playerCount }).map((_, i) => ({
         id: i + 1, name: `Player ${i + 1}`, score: settings.startingScore, lastRoundScore: null, dartsThrown: 0, roundDarts: []
       }));
-      gameState = { players, currentPlayerIndex: 0, currentRound: 1, currentTurnDarts: [], turnStartScore: settings.startingScore, winner: null, isBust: false };
+      gameState = { players, currentPlayerIndex: 0, currentRound: 1, currentTurnDarts: [], turnStartScore: settings.startingScore, winner: null, isBust: false, gameLog: [] };
       historyStack = [];
       lastDartLabel = "READY";
       isMenuOpen = false;
+      isRecordOpen = false;
       render();
     };
 
@@ -232,6 +239,20 @@
       if (isWin) {
         gameState.players[gameState.currentPlayerIndex].score = 0;
         gameState.winner = gameState.players[gameState.currentPlayerIndex].name;
+        
+        // 紀錄勝利回合
+        let roundObj = gameState.gameLog.find(r => r.round === gameState.currentRound);
+        if (!roundObj) {
+            roundObj = { round: gameState.currentRound, turns: [] };
+            gameState.gameLog.push(roundObj);
+        }
+        roundObj.turns.push({
+            playerName: gameState.winner,
+            darts: cloneState(gameState.currentTurnDarts),
+            scoreAfter: 0,
+            isBust: false,
+            isWin: true
+        });
       } else if (isBust) {
         gameState.isBust = true;
         gameState.players[gameState.currentPlayerIndex].score = gameState.turnStartScore;
@@ -248,6 +269,20 @@
     window.advanceTurn = () => {
       const currentPlayer = gameState.players[gameState.currentPlayerIndex];
       currentPlayer.lastRoundScore = gameState.isBust ? 0 : gameState.currentTurnDarts.reduce((acc, dart) => acc + dart.points, 0);
+      
+      // 寫入當前回合紀錄 (Game Log)
+      let roundObj = gameState.gameLog.find(r => r.round === gameState.currentRound);
+      if (!roundObj) {
+          roundObj = { round: gameState.currentRound, turns: [] };
+          gameState.gameLog.push(roundObj);
+      }
+      roundObj.turns.push({
+          playerName: currentPlayer.name,
+          darts: cloneState(gameState.currentTurnDarts),
+          scoreAfter: currentPlayer.score, // 爆分的話，分數已在 handleThrow 重設
+          isBust: gameState.isBust,
+          isWin: false
+      });
       
       gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % settings.playerCount;
       gameState.currentTurnDarts = [];
@@ -490,6 +525,86 @@
         </div>
       ` : '';
 
+      // 紀錄卡面渲染 (Record Page)
+      let recordHTML = '';
+      if (isRecordOpen) {
+        let displayLog = cloneState(gameState.gameLog);
+        
+        // 如果當前遊戲進行中，將「正在掟緊」嘅回合動態加入紀錄版面，方便查看
+        if (!gameState.winner) {
+            let liveRound = displayLog.find(r => r.round === gameState.currentRound);
+            if (!liveRound) {
+                liveRound = { round: gameState.currentRound, turns: [] };
+                displayLog.push(liveRound);
+            }
+            liveRound.turns.push({
+                playerName: gameState.players[gameState.currentPlayerIndex].name,
+                darts: gameState.currentTurnDarts,
+                scoreAfter: gameState.players[gameState.currentPlayerIndex].score,
+                isBust: gameState.isBust,
+                isLive: true
+            });
+        }
+
+        let logContent = displayLog.slice().reverse().map(round => {
+            let turnsHTML = round.turns.map(turn => {
+                let dartsCells = [0, 1, 2].map(i => {
+                    let dart = turn.darts[i];
+                    if (!dart) return `<div class="w-7 h-7 sm:w-8 sm:h-8 rounded border border-neutral-800 ${turn.isLive ? 'bg-neutral-900/40' : 'bg-neutral-900'} flex items-center justify-center text-neutral-600 text-[10px] font-medium">-</div>`;
+                    let content = dart.isBust ? 'X' : dart.label;
+                    let colorClass = dart.isBust ? 'text-red-500' : 'text-white';
+                    return `<div class="w-7 h-7 sm:w-8 sm:h-8 rounded border border-neutral-700 bg-neutral-800 flex items-center justify-center ${colorClass} text-[10px] font-medium">${content}</div>`;
+                }).join('');
+
+                let opClass = turn.isLive ? 'opacity-60 animate-pulse' : 'opacity-100';
+                let bustLabel = turn.isBust ? `<span class="text-[8px] text-red-500 bg-red-500/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">BUST</span>` : '';
+                let winLabel = turn.isWin ? `<span class="text-[8px] text-[#967d54] bg-[#967d54]/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">WIN</span>` : '';
+
+                return `
+                <div class="flex items-center justify-between py-3 border-b border-neutral-800/50 last:border-0 ${opClass}">
+                    <div class="flex flex-col w-[80px] sm:w-[100px]">
+                        <div class="text-[11px] font-medium text-neutral-300 truncate tracking-wide">${turn.playerName}</div>
+                        ${bustLabel ? `<div class="mt-1">${bustLabel}</div>` : ''}
+                        ${winLabel ? `<div class="mt-1">${winLabel}</div>` : ''}
+                    </div>
+                    <div class="flex gap-1.5 flex-1 justify-center">
+                        ${dartsCells}
+                    </div>
+                    <div class="text-[14px] font-bold ${turn.isWin ? 'text-[#967d54]' : 'text-white'} w-[45px] text-right">${turn.scoreAfter}</div>
+                </div>
+                `;
+            }).join('');
+
+            return `
+            <div class="bg-[#111] rounded-lg p-4 border border-neutral-800 shadow-sm">
+                <div class="text-[10px] font-bold tracking-[0.15em] text-neutral-500 mb-2 uppercase border-b border-neutral-800 pb-2">ROUND ${round.round}</div>
+                <div class="flex flex-col">
+                    ${turnsHTML}
+                </div>
+            </div>
+            `;
+        }).join('');
+
+        if(displayLog.length === 0) {
+          logContent = `<div class="flex-1 flex items-center justify-center text-neutral-500 text-xs tracking-widest uppercase">No Records Yet</div>`;
+        }
+
+        recordHTML = `
+        <div class="fixed inset-0 z-50 bg-black flex flex-col px-5 py-8 overflow-hidden animate-fade-in">
+          <div class="flex justify-between items-center mb-5 shrink-0 pb-4 border-b border-neutral-800">
+            <div class="flex items-center gap-2.5">
+               <img src="./assets/record.svg" alt="Record" class="h-[14px] object-contain opacity-80">
+               <span class="text-white font-bold tracking-[0.15em] text-[12px] uppercase">Match Record</span>
+            </div>
+            <button onclick="window.toggleRecord()" class="text-neutral-400 text-[11px] font-medium tracking-[0.15em] uppercase hover:text-white transition-colors py-2 pl-4">CLOSE</button>
+          </div>
+          <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col gap-4 pb-10">
+            ${logContent}
+          </div>
+        </div>
+        `;
+      }
+
       // 玩家資訊卡渲染
       const gridColsClass = `grid-cols-${settings.playerCount}`;
       const playersCardsHTML = `<div class="grid ${gridColsClass} gap-2 px-4 w-full">` + gameState.players.map((player, idx) => {
@@ -511,33 +626,33 @@
         `;
       }).join('') + `</div>`;
 
-      // 鍵盤渲染
+      // 鍵盤渲染 - 加入 hover:bg-neutral-800
       const isInputDisabled = !!gameState.winner || gameState.isBust || gameState.currentTurnDarts.length >= 3;
       const disableAttr = isInputDisabled ? 'disabled="disabled" style="opacity:0.4"' : '';
       const numKeys = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
       const keypadHTML = numKeys.map(num => `
-        <div id="btn-${num}" class="bg-black rounded-lg overflow-hidden flex flex-col border border-neutral-800 h-[60px] sm:h-[68px] num-btn">
-          <button onclick="window.handleThrow(${num}, 1, '${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[16px] font-medium text-white">${num}</button>
+        <div id="btn-${num}" class="bg-black rounded-lg overflow-hidden flex flex-col border border-neutral-800 h-[60px] sm:h-[68px] num-btn transition-colors duration-150">
+          <button onclick="window.handleThrow(${num}, 1, '${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[16px] font-medium text-white hover:bg-neutral-800 transition-colors">${num}</button>
           <div class="flex h-[28px] sm:h-[32px] border-t border-neutral-800">
-            <button onclick="window.handleThrow(${num}, 2, 'D${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-transparent border-r border-neutral-800">D</button>
-            <button onclick="window.handleThrow(${num}, 3, 'T${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-transparent">T</button>
+            <button onclick="window.handleThrow(${num}, 2, 'D${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-transparent border-r border-neutral-800 hover:bg-neutral-800 hover:text-white transition-colors">D</button>
+            <button onclick="window.handleThrow(${num}, 3, 'T${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-transparent hover:bg-neutral-800 hover:text-white transition-colors">T</button>
           </div>
         </div>
       `).join('');
 
       const winActionsHTML = `
         <div class="flex-1 flex flex-col items-center justify-start pt-4 gap-5 w-full animate-fade-in pb-10">
-          <button class="w-[220px] py-4 rounded-lg border border-neutral-800 text-white font-medium text-xs tracking-[0.15em] uppercase transition-colors">ROUND HISTORY</button>
-          <button onclick="window.initGame()" class="w-[220px] py-4 rounded-lg bg-white text-black font-medium text-xs tracking-[0.15em] uppercase transition-colors">RESTART</button>
+          <button onclick="window.toggleRecord()" class="w-[220px] py-4 rounded-lg border border-neutral-800 text-white font-medium text-xs tracking-[0.15em] uppercase transition-colors hover:bg-neutral-900">ROUND HISTORY</button>
+          <button onclick="window.initGame()" class="w-[220px] py-4 rounded-lg bg-white text-black font-medium text-xs tracking-[0.15em] uppercase transition-colors hover:bg-neutral-200">RESTART</button>
         </div>
       `;
 
       const controlPanelHTML = gameState.winner ? winActionsHTML : `
         <div class="flex-none bg-black">
           <div class="flex gap-2 mb-2 px-4">
-            <button id="btn-sbull" onclick="window.handleThrow(25, 1, 'S-BULL', 'btn-sbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn">S-BULL</button>
-            <button id="btn-dbull" onclick="window.handleThrow(50, 1, 'D-BULL', 'btn-dbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn">D-BULL</button>
-            <button id="btn-miss" onclick="window.handleThrow(0, 1, 'MISS', 'btn-miss')" ${disableAttr} class="w-[72px] bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn">MISS</button>
+            <button id="btn-sbull" onclick="window.handleThrow(25, 1, 'S-BULL', 'btn-sbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn hover:bg-neutral-800 transition-colors">S-BULL</button>
+            <button id="btn-dbull" onclick="window.handleThrow(50, 1, 'D-BULL', 'btn-dbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn hover:bg-neutral-800 transition-colors">D-BULL</button>
+            <button id="btn-miss" onclick="window.handleThrow(0, 1, 'MISS', 'btn-miss')" ${disableAttr} class="w-[72px] bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn hover:bg-neutral-800 transition-colors">MISS</button>
           </div>
           <div class="grid grid-cols-5 gap-2 px-4 pb-6 overflow-y-auto hide-scrollbar">${keypadHTML}</div>
         </div>
@@ -545,12 +660,13 @@
 
       appDiv.innerHTML = `
         ${menuHTML}
+        ${recordHTML}
         <div class="max-w-md mx-auto w-full bg-black relative flex flex-col h-full overflow-hidden">
           <header class="flex-none pt-6 pb-2 px-5 flex items-start justify-between sticky top-0 bg-black/95 backdrop-blur z-30">
             <div class="flex items-start"><img src="./assets/Logo.svg" alt="Target" class="h-[19px] object-contain opacity-90"></div>
             <div class="flex items-start gap-5">
               <button onclick="window.openMenu()" class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/setting.svg" alt="Settings" class="h-[12px] object-contain"></button>
-              <button onclick="alert('History Record (Coming soon)')" class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/record.svg" alt="Record" class="h-[15px] object-contain"></button>
+              <button onclick="window.toggleRecord()" class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/record.svg" alt="Record" class="h-[15px] object-contain"></button>
               <button onclick="window.handleUndo()" ${historyStack.length === 0 ? 'disabled style="opacity:0.2"' : ''} class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/back.svg" alt="Undo" class="h-[13px] object-contain"></button>
             </div>
           </header>
