@@ -51,31 +51,31 @@
     /* 消除按鈕預設點擊高光 */
     button { -webkit-tap-highlight-color: transparent; outline: none; }
     
-    /* 手機版點擊回饋樣式 */
+    /* 手機版點擊回饋樣式 (按鈕) */
     .tap-active { background-color: #333333 !important; color: #ffffff !important; transition: background-color 0.1s; }
     .key-tap-active { background-color: #ffffff !important; color: #000000 !important; }
 
-    /* 標靶點擊感應區 */
+    /* 標靶點擊感應區 (基本) */
     .dart-zone {
       fill: transparent;
       transition: fill 0.2s ease-out;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
-    /* 手機點擊時即時反光 */
-    .dart-zone:active {
-      fill: rgba(255, 255, 255, 0.4);
-      transition: none;
-    }
-    
     .dart-zone-stroke {
       transition: stroke 0.2s ease-out;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
-    .dart-zone-stroke:active {
-      stroke: rgba(255, 255, 255, 0.3);
-      transition: none;
+
+    /* SVG 專屬 500ms 點擊特效 (由 JS 動態加入) */
+    .svg-tap-active {
+      fill: rgba(255, 255, 255, 0.3) !important;
+      transition: fill 0.05s ease-out !important; /* 快速亮起，移除 class 時會使用原本的 0.2s 淡出 */
+    }
+    .svg-tap-stroke-active {
+      stroke: rgba(255, 255, 255, 0.2) !important;
+      transition: stroke 0.05s ease-out !important;
     }
 
     /* 只在支援 Hover 的裝置 (電腦) 啟用懸停效果 */
@@ -286,8 +286,20 @@
       }
     };
 
-    // 處理標靶點擊並計算精確座標
+    // 處理標靶點擊並計算精確座標 + 500ms 動畫
     window.handleBoardClick = (evt, score, multiplier, label) => {
+      // 1. 處理 500ms 視覺特效
+      const tapZone = evt.target.closest('.dart-zone, .dart-zone-stroke');
+      if (tapZone) {
+        const isStroke = tapZone.classList.contains('dart-zone-stroke');
+        const activeClass = isStroke ? 'svg-tap-stroke-active' : 'svg-tap-active';
+        tapZone.classList.add(activeClass);
+        setTimeout(() => {
+          tapZone.classList.remove(activeClass);
+        }, 500);
+      }
+
+      // 2. 計算落點座標
       const svg = evt.target.closest('svg');
       let x, y;
       let clientX = evt.clientX;
@@ -867,9 +879,9 @@
             
             <!-- 左側：標靶 (Mobile: 上方/佔滿剩餘空間) -->
             <div class="flex-1 relative min-h-0 flex flex-col lg:justify-center lg:py-8 lg:pr-8">
-              <!-- 標靶容器 -->
-              <div class="flex-1 flex items-center justify-center p-4 lg:p-0 w-full h-full min-h-0 overflow-hidden">
-                <svg viewBox="-105 -105 210 210" class="h-full w-auto max-w-full max-h-full">
+              <!-- 標靶容器，縮小 Padding，放大 SVG Size -->
+              <div class="flex-1 flex items-center justify-center px-1 py-2 lg:p-0 w-full h-full min-h-0 overflow-hidden">
+                <svg viewBox="-105 -105 210 210" class="w-[96%] max-w-[400px] lg:max-w-none lg:w-auto h-auto max-h-full lg:h-full">
                   ${dynamicSVG}
                 </svg>
               </div>
