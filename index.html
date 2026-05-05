@@ -158,6 +158,7 @@
     let isMenuOpen = false;
     let menuJustOpened = false;
     let isRecordOpen = false;
+    let selectedHistoryMatch = null; 
     let isEditModalOpen = false;
     let editingPlayerIdx = null;
 
@@ -167,6 +168,32 @@
     let historyStack = [];
     let timeoutRef = null;
     let lastDartLabel = "READY";
+    let matchHistory = []; 
+
+    // --- 初始化及持久化 ---
+    const loadHistory = () => {
+      const saved = localStorage.getItem('target_darts_history');
+      if (saved) matchHistory = JSON.parse(saved);
+    };
+
+    const saveHistory = () => {
+      localStorage.setItem('target_darts_history', JSON.stringify(matchHistory));
+    };
+
+    const recordFinishedGame = () => {
+      if (!gameState || !gameState.winner) return;
+      const newMatchRecord = {
+        id: Date.now(),
+        timestamp: new Date().toLocaleString(),
+        settings: cloneState(settings),
+        gameLog: cloneState(gameState.gameLog),
+        players: cloneState(gameState.players),
+        winner: gameState.winner
+      };
+      matchHistory.unshift(newMatchRecord); 
+      if (matchHistory.length > 20) matchHistory.pop(); 
+      saveHistory();
+    };
 
     // --- 核心邏輯 ---
     window.openMenu = () => { 
@@ -185,6 +212,16 @@
 
     window.toggleRecord = () => {
       isRecordOpen = !isRecordOpen;
+      selectedHistoryMatch = null; 
+      render();
+    };
+
+    window.viewMatchDetail = (matchId) => {
+      if (matchId === 'current') {
+        selectedHistoryMatch = 'current';
+      } else {
+        selectedHistoryMatch = matchHistory.find(m => m.id === matchId);
+      }
       render();
     };
 
@@ -364,6 +401,8 @@
             isBust: false,
             isWin: true
         });
+        // 遊戲結束，儲存到歷史
+        recordFinishedGame();
       } else if (isBust) {
         gameState.isBust = true;
         gameState.players[gameState.currentPlayerIndex].score = gameState.turnStartScore;
@@ -472,7 +511,7 @@
       });
       gridSVG += `<circle cx="0" cy="0" r="102" fill="none" stroke="#475569" stroke-width="0.5"></circle>`;
       for(let i=0; i<20; i++) {
-        const angle = i * i * 0 + i * 18 + 9;
+        const angle = i * 18 + 9;
         const pInner = polarToCartesian(0, 0, 15, angle);
         const pDoubleOuter = polarToCartesian(0, 0, 88, angle);
         const pOutermost = polarToCartesian(0, 0, 102, angle);
@@ -520,38 +559,26 @@
           px = dart.hitCoords.x;
           py = dart.hitCoords.y;
         } else if (dart.label === 'MISS') {
-          // 處理 MISS 標示：如果冇座標（撳掣），擺喺外圈 (Radius 101)，根據鏢數稍微偏移
           const missPos = polarToCartesian(0, 0, 101, -5 + (dIdx * 5));
           px = missPos.x;
           py = missPos.y;
         } else {
           const targetGeom = getTargetGeometry(dart.label);
           if (!targetGeom) return "";
-          // 多鏢命中同一區時偏移
           const offset = (dIdx * 3);
           px = targetGeom.center.x + offset;
           py = targetGeom.center.y + offset;
         }
-
         const opacityValue = dart.isBust ? "0.4" : "1";
         const filterStr = isGhost ? `filter="url(#ghostTint)"` : "";
-        
-        return `
-          <g transform="translate(${px}, ${py})">
-            <image href="./assets/x.svg" x="-3" y="-3" width="6" height="6" ${filterStr} opacity="${opacityValue}" />
-          </g>`;
+        return `<g transform="translate(${px}, ${py})"><image href="./assets/x.svg" x="-3" y="-3" width="6" height="6" ${filterStr} opacity="${opacityValue}" /></g>`;
       };
 
       if (prevDarts && prevDarts.length > 0) {
-        prevDarts.forEach((dart, dIdx) => {
-          hitsSVG += renderDart(dart, dIdx, true);
-        });
+        prevDarts.forEach((dart, dIdx) => { hitsSVG += renderDart(dart, dIdx, true); });
       }
-
       if (currentDarts && currentDarts.length > 0) {
-        currentDarts.forEach((dart, dIdx) => {
-          hitsSVG += renderDart(dart, dIdx, false);
-        });
+        currentDarts.forEach((dart, dIdx) => { hitsSVG += renderDart(dart, dIdx, false); });
       }
       hitsSVG += `</g>`;
       svg += hitsSVG;
@@ -675,79 +702,121 @@
 
       let recordHTML = '';
       if (isRecordOpen) {
-        let displayLog = cloneState(gameState.gameLog);
-        if (!gameState.winner) {
-            let liveRound = displayLog.find(r => r.round === gameState.currentRound);
-            if (!liveRound) {
-                liveRound = { round: gameState.currentRound, turns: [] };
-                displayLog.push(liveRound);
-            }
-            liveRound.turns.push({
-                playerName: gameState.players[gameState.currentPlayerIndex].name,
-                darts: gameState.currentTurnDarts,
-                scoreAfter: gameState.players[gameState.currentPlayerIndex].score,
-                isBust: gameState.isBust,
-                isLive: true
-            });
-        }
-
-        let logContent = displayLog.slice().reverse().map(round => {
-            let turnsHTML = round.turns.map(turn => {
-                let dartsCells = [0, 1, 2].map(i => {
-                    let dart = turn.darts[i];
-                    if (!dart) return `<div class="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded border border-neutral-800 ${turn.isLive ? 'bg-neutral-900/40' : 'bg-neutral-900'} flex items-center justify-center text-neutral-600 text-[10px] lg:text-[13px] font-medium">-</div>`;
-                    let content = dart.isBust ? 'X' : dart.label;
-                    let colorClass = dart.isBust ? 'text-red-500' : 'text-white';
-                    return `<div class="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded border border-neutral-700 bg-neutral-800 flex items-center justify-center ${colorClass} text-[10px] lg:text-[13px] font-medium">${content}</div>`;
-                }).join('');
-
-                let opClass = turn.isLive ? 'opacity-60 animate-pulse' : 'opacity-100';
-                let bustLabel = turn.isBust ? `<span class="text-[8px] lg:text-[10px] text-red-500 bg-red-500/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">BUST</span>` : '';
-                let winLabel = turn.isWin ? `<span class="text-[8px] lg:text-[10px] text-[#967d54] bg-[#967d54]/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">WIN</span>` : '';
-
-                return `
-                <div class="flex items-center justify-between py-3 lg:py-4 border-b border-neutral-800/50 last:border-0 ${opClass}">
-                    <div class="flex flex-col w-[80px] sm:w-[100px] lg:w-[140px]">
-                        <div class="text-[11px] lg:text-[14px] font-medium text-neutral-300 truncate tracking-wide">${turn.playerName}</div>
-                        ${bustLabel ? `<div class="mt-1">${bustLabel}</div>` : ''}
-                        ${winLabel ? `<div class="mt-1">${winLabel}</div>` : ''}
-                    </div>
-                    <div class="flex gap-1.5 lg:gap-2 flex-1 justify-center">
-                        ${dartsCells}
-                    </div>
-                    <div class="text-[14px] lg:text-[18px] font-bold ${turn.isWin ? 'text-[#967d54]' : 'text-white'} w-[45px] lg:w-[60px] text-right">${turn.scoreAfter}</div>
-                </div>
-                `;
-            }).join('');
-
-            return `
-            <div class="bg-[#111] rounded-lg p-4 lg:p-6 border border-neutral-800 shadow-sm">
-                <div class="text-[10px] lg:text-[13px] font-bold tracking-[0.15em] text-neutral-500 mb-2 lg:mb-4 uppercase border-b border-neutral-800 pb-2 lg:pb-3">ROUND ${round.round}</div>
-                <div class="flex flex-col">
-                    ${turnsHTML}
-                </div>
+        if (!selectedHistoryMatch) {
+          // 顯示歷史列表 (All Records)
+          let historyListHTML = matchHistory.map(m => `
+            <div onclick="window.viewMatchDetail(${m.id})" class="bg-[#111] rounded-lg p-5 border border-neutral-800 hover:border-neutral-600 transition-colors cursor-pointer group flex items-center justify-between">
+               <div class="flex flex-col gap-1">
+                  <div class="text-[12px] lg:text-[15px] font-bold text-white tracking-wider">${m.winner} WIN</div>
+                  <div class="text-[9px] lg:text-[11px] text-neutral-500 uppercase tracking-widest">
+                    ${m.settings.gameMode} | ${m.settings.startingScore} | ${m.settings.checkoutMode.replace(' out', '').toUpperCase()}
+                  </div>
+                  <div class="text-[8px] lg:text-[10px] text-neutral-600 font-medium">${m.timestamp}</div>
+               </div>
+               <img src="./assets/arrow.svg" alt="Detail" class="h-[10px] lg:h-[12px] opacity-20 group-hover:opacity-100 transition-opacity -rotate-90">
             </div>
-            `;
-        }).join('');
+          `).join('');
 
-        if(displayLog.length === 0) {
-          logContent = `<div class="flex-1 flex items-center justify-center text-neutral-500 text-xs lg:text-[14px] tracking-widest uppercase">No Records Yet</div>`;
-        }
-
-        recordHTML = `
-        <div class="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden animate-fade-in">
-          <header class="flex-none pt-6 pb-4 px-5 lg:px-12 flex items-start justify-between z-30 w-full border-b border-neutral-800 shrink-0">
-            <div class="flex items-center gap-2.5">
-               <img src="./assets/record.svg" alt="Record" class="h-[14px] lg:h-[18px] object-contain opacity-80">
-               <span class="text-white font-bold tracking-[0.15em] text-[12px] lg:text-[16px] uppercase pt-0.5">Match Record</span>
+          // 當前賽局入口 (如果正在遊戲中) - 轉為「Current Match」
+          const currentEntry = gameState.gameLog.length > 0 || gameState.currentTurnDarts.length > 0 ? `
+            <div onclick="window.viewMatchDetail('current')" class="bg-[#1a1a1a] rounded-lg p-5 border-2 border-dashed border-neutral-700 hover:border-white transition-colors cursor-pointer mb-4 flex items-center justify-between">
+               <div class="flex flex-col gap-1">
+                  <div class="text-[14px] lg:text-[17px] font-bold text-white tracking-wide">Current Match</div>
+                  <div class="text-[9px] lg:text-[11px] text-neutral-400 uppercase tracking-widest">In Progress...</div>
+               </div>
+               <div class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
             </div>
-            <button onclick="window.toggleRecord()" class="text-neutral-400 text-[11px] lg:text-[14px] font-medium tracking-[0.15em] uppercase hover:text-white active:text-white transition-colors pt-1 lg:pt-1.5 key-base">CLOSE</button>
-          </header>
-          <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col gap-4 lg:gap-6 pt-6 pb-10 px-5 lg:px-0 max-w-[800px] w-full mx-auto">
-            ${logContent}
+          ` : '';
+
+          recordHTML = `
+          <div class="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden animate-fade-in">
+            <header class="flex-none pt-6 pb-4 px-5 lg:px-12 flex items-start justify-center z-30 w-full border-b border-neutral-800 shrink-0 relative">
+               <div class="text-white font-bold tracking-[0.15em] text-[12px] lg:text-[16px] uppercase pt-0.5">MATCH HISTORY</div>
+               <button onclick="window.toggleRecord()" class="absolute right-5 lg:right-12 text-neutral-400 text-[11px] lg:text-[14px] font-medium tracking-[0.15em] uppercase hover:text-white active:text-white transition-colors pt-1 lg:pt-1.5 key-base">CLOSE</button>
+            </header>
+            <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col pt-6 pb-10 px-5 max-w-[800px] w-full mx-auto">
+              ${currentEntry}
+              <div class="flex flex-col gap-3">
+                ${historyListHTML || '<div class="text-center py-20 text-neutral-700 tracking-widest text-[11px] uppercase">No History Found</div>'}
+              </div>
+            </div>
           </div>
-        </div>
-        `;
+          `;
+        } else {
+          // 顯示詳細比賽紀錄 (Match Detail)
+          let matchData = selectedHistoryMatch === 'current' ? {
+              settings: settings,
+              gameLog: cloneState(gameState.gameLog),
+              players: gameState.players,
+              isLive: true
+          } : selectedHistoryMatch;
+
+          let displayLog = [...matchData.gameLog];
+          if (matchData.isLive && !gameState.winner) {
+              displayLog.push({
+                  round: gameState.currentRound,
+                  turns: [{
+                      playerName: gameState.players[gameState.currentPlayerIndex].name,
+                      darts: gameState.currentTurnDarts,
+                      scoreAfter: gameState.players[gameState.currentPlayerIndex].score,
+                      isBust: gameState.isBust,
+                      isLive: true
+                  }]
+              });
+          }
+
+          let logContent = displayLog.slice().reverse().map(round => {
+              let turnsHTML = round.turns.map(turn => {
+                  let dartsCells = [0, 1, 2].map(i => {
+                      let dart = turn.darts[i];
+                      if (!dart) return `<div class="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded border border-neutral-800 ${turn.isLive ? 'bg-neutral-900/40' : 'bg-neutral-900'} flex items-center justify-center text-neutral-600 text-[10px] lg:text-[13px] font-medium">-</div>`;
+                      let content = dart.isBust ? 'X' : dart.label;
+                      let colorClass = dart.isBust ? 'text-red-500' : 'text-white';
+                      return `<div class="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded border border-neutral-700 bg-neutral-800 flex items-center justify-center ${colorClass} text-[10px] lg:text-[13px] font-medium">${content}</div>`;
+                  }).join('');
+
+                  let opClass = turn.isLive ? 'opacity-60 animate-pulse' : 'opacity-100';
+                  let bustLabel = turn.isBust ? `<span class="text-[8px] lg:text-[10px] text-red-500 bg-red-500/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">BUST</span>` : '';
+                  let winLabel = turn.isWin ? `<span class="text-[8px] lg:text-[10px] text-[#967d54] bg-[#967d54]/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">WIN</span>` : '';
+
+                  return `
+                  <div class="flex items-center justify-between py-3 lg:py-4 border-b border-neutral-800/50 last:border-0 ${opClass}">
+                      <div class="flex flex-col w-[80px] sm:w-[100px] lg:w-[140px]">
+                          <div class="text-[11px] lg:text-[14px] font-medium text-neutral-300 truncate tracking-wide">${turn.playerName}</div>
+                          ${bustLabel || winLabel ? `<div class="mt-1">${bustLabel}${winLabel}</div>` : ''}
+                      </div>
+                      <div class="flex gap-1.5 lg:gap-2 flex-1 justify-center">${dartsCells}</div>
+                      <div class="text-[14px] lg:text-[18px] font-bold ${turn.isWin ? 'text-[#967d54]' : 'text-white'} w-[45px] lg:w-[60px] text-right">${turn.scoreAfter}</div>
+                  </div>
+                  `;
+              }).join('');
+
+              return `
+              <div class="bg-[#111] rounded-lg p-4 lg:p-6 border border-neutral-800 shadow-sm mb-4">
+                  <div class="text-[10px] lg:text-[13px] font-bold tracking-[0.15em] text-neutral-500 mb-2 lg:mb-4 uppercase border-b border-neutral-800 pb-2 lg:pb-3">ROUND ${round.round}</div>
+                  <div class="flex flex-col">${turnsHTML}</div>
+              </div>
+              `;
+          }).join('');
+
+          recordHTML = `
+          <div class="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden animate-fade-in">
+            <header class="flex-none pt-6 pb-4 px-5 lg:px-12 flex items-start justify-between z-30 w-full border-b border-neutral-800 shrink-0">
+               <button onclick="window.viewMatchDetail(null)" class="text-neutral-400 text-[11px] lg:text-[14px] font-medium tracking-[0.15em] uppercase hover:text-white transition-colors pt-1 lg:pt-1.5 flex items-center gap-1.5 key-base">
+                 <img src="./assets/arrow.svg" class="h-[8px] rotate-90 opacity-60"> BACK
+               </button>
+               <div class="flex flex-col items-center">
+                 <span class="text-white font-black tracking-[0.2em] text-[12px] lg:text-[16px] uppercase pt-0.5">MATCH RECORD</span>
+                 <span class="text-[8px] text-neutral-600 tracking-widest uppercase">${matchData.isLive ? 'LIVE' : matchData.timestamp}</span>
+               </div>
+               <button onclick="window.toggleRecord()" class="text-neutral-400 text-[11px] lg:text-[14px] font-medium tracking-[0.15em] uppercase hover:text-white active:text-white transition-colors pt-1 lg:pt-1.5 key-base">CLOSE</button>
+            </header>
+            <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col pt-6 pb-10 px-5 max-w-[800px] w-full mx-auto">
+              ${logContent}
+            </div>
+          </div>
+          `;
+        }
       }
 
       let editModalHTML = '';
@@ -808,9 +877,10 @@
         </div>
       `).join('');
 
+      // 更新結算畫面的按鈕文字為 MATCH RECORD
       const winActionsHTML = `
         <div class="flex-1 flex flex-col items-center justify-start pt-4 gap-5 w-full animate-fade-in pb-10 lg:pb-0">
-          <button onclick="window.toggleRecord()" class="w-[220px] lg:w-[260px] py-4 lg:py-5 rounded-lg border border-neutral-800 text-white font-medium text-xs lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-900 transition-colors key-base">ROUND HISTORY</button>
+          <button onclick="window.toggleRecord()" class="w-[220px] lg:w-[260px] py-4 lg:py-5 rounded-lg border border-neutral-800 text-white font-medium text-xs lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-900 transition-colors key-base">MATCH RECORD</button>
           <button onclick="window.initGame()" class="w-[220px] lg:w-[260px] py-4 lg:py-5 rounded-lg bg-white text-black font-medium text-xs lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-200 transition-colors key-base">RESTART</button>
         </div>
       `;
@@ -873,7 +943,10 @@
       `;
     }
 
-    window.onload = () => { window.initGame(); };
+    window.onload = () => { 
+      loadHistory();
+      window.initGame(); 
+    };
   </script>
 </body>
 </html>
