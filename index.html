@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>TARGET</title>
+  <title>TARGET Darts Scoreboard</title>
   <!-- 引入 Google Fonts (Inter) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -41,9 +41,40 @@
     
     button { -webkit-tap-highlight-color: transparent; outline: none; }
     
-    /* 手機版點擊回饋 */
-    .tap-active { background-color: #333333 !important; color: #ffffff !important; transition: background-color 0.1s; }
-    .key-tap-active { background-color: #ffffff !important; color: #000000 !important; }
+    /* 按鈕漸變動畫 (淡出用) */
+    .num-btn, .action-btn {
+      transition: background-color 0.4s ease-out, color 0.4s ease-out;
+    }
+    /* 手機版點擊回饋 (即刻變色，無延遲) */
+    .tap-active { 
+      background-color: #333333 !important; 
+      color: #ffffff !important; 
+      transition: none !important; 
+    }
+    .key-tap-active { 
+      background-color: #ffffff !important; 
+      color: #000000 !important; 
+      transition: none !important; 
+    }
+
+    /* 標靶點擊感應區 */
+    .dart-zone {
+      fill: transparent;
+      transition: fill 0.2s ease-out;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .dart-zone:hover, .dart-zone:active {
+      fill: rgba(255, 255, 255, 0.3);
+    }
+    .dart-zone-stroke {
+      transition: stroke 0.2s ease-out;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .dart-zone-stroke:hover, .dart-zone-stroke:active {
+      stroke: rgba(255, 255, 255, 0.15);
+    }
   </style>
 </head>
 <body class="bg-black selection:bg-white/30">
@@ -161,9 +192,10 @@
         const isNumKey = el.classList.contains('num-btn');
         const effectClass = isNumKey ? 'key-tap-active' : 'tap-active';
         el.classList.add(effectClass);
+        // Hold 150ms 之後再開始淡出
         setTimeout(() => {
           el.classList.remove(effectClass);
-        }, 500);
+        }, 150);
       }
     };
 
@@ -249,11 +281,8 @@
       if (!label) return null;
       const upperLabel = label.toUpperCase();
       
-      // 處理 Bullseye
       if (upperLabel === 'S-BULL') return { path: `<circle cx="0" cy="0" r="15" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
       if (upperLabel === 'D-BULL') return { path: `<circle cx="0" cy="0" r="6" fill="#ffffff"></circle>`, center: {x: 0, y: 0} };
-      
-      // 處理 MISS (擺喺 12 點鐘方向外圍)
       if (upperLabel === 'MISS') return { path: null, center: polarToCartesian(0, 0, 103, 0) };
 
       let type = 'S';
@@ -280,30 +309,36 @@
       };
     };
 
-    // 生成標靶 SVG
+    // 生成互動式標靶 SVG
     const generateDartboardSVG = (currentDarts, suggestionTarget) => {
+      // 1. 基底
       let svg = `<circle cx="0" cy="0" r="105" fill="#000000"></circle>`;
-      // 繪製格線
+      
+      // 2. 建議路徑提示
+      if (suggestionTarget) {
+        const targetGeom = getTargetGeometry(suggestionTarget);
+        if (targetGeom && targetGeom.path) svg += `<g pointer-events="none">${targetGeom.path}</g>`;
+      }
+
+      // 3. 繪製格線 (避免遮擋點擊，設置 pointer-events-none)
+      let gridSVG = `<g pointer-events="none">`;
       [88, 80, 48, 40, 15, 6].forEach(r => {
-        svg += `<circle cx="0" cy="0" r="${r}" fill="none" stroke="#ffffff" stroke-width="0.5"></circle>`;
+        gridSVG += `<circle cx="0" cy="0" r="${r}" fill="none" stroke="#ffffff" stroke-width="0.5"></circle>`;
       });
-      svg += `<circle cx="0" cy="0" r="102" fill="none" stroke="#475569" stroke-width="0.5"></circle>`;
+      gridSVG += `<circle cx="0" cy="0" r="102" fill="none" stroke="#475569" stroke-width="0.5"></circle>`;
       for(let i=0; i<20; i++) {
         const angle = i * 18 + 9;
         const pInner = polarToCartesian(0, 0, 15, angle);
         const pDoubleOuter = polarToCartesian(0, 0, 88, angle);
         const pOutermost = polarToCartesian(0, 0, 102, angle);
-        svg += `<line x1="${pInner.x}" y1="${pInner.y}" x2="${pDoubleOuter.x}" y2="${pDoubleOuter.y}" stroke="#ffffff" stroke-width="0.5"></line>`;
-        svg += `<line x1="${pDoubleOuter.x}" y1="${pDoubleOuter.y}" x2="${pOutermost.x}" y2="${pOutermost.y}" stroke="#475569" stroke-width="0.5"></line>`;
+        gridSVG += `<line x1="${pInner.x}" y1="${pInner.y}" x2="${pDoubleOuter.x}" y2="${pDoubleOuter.y}" stroke="#ffffff" stroke-width="0.5"></line>`;
+        gridSVG += `<line x1="${pDoubleOuter.x}" y1="${pDoubleOuter.y}" x2="${pOutermost.x}" y2="${pOutermost.y}" stroke="#475569" stroke-width="0.5"></line>`;
       }
-      
-      // 建議目標提示
-      if (suggestionTarget) {
-        const targetGeom = getTargetGeometry(suggestionTarget);
-        if (targetGeom && targetGeom.path) svg += targetGeom.path;
-      }
-      
-      // 繪製數字
+      gridSVG += `</g>`;
+      svg += gridSVG;
+
+      // 4. 繪製數字 (避免遮擋點擊)
+      let textSVG = `<g pointer-events="none">`;
       let targetBaseNum = null;
       if (suggestionTarget && !suggestionTarget.includes('Bull')) {
         targetBaseNum = parseInt(suggestionTarget.replace(/[^0-9]/g, ''));
@@ -312,10 +347,37 @@
         const angle = i * 18;
         const p = polarToCartesian(0, 0, 95, angle);
         let numColor = (targetBaseNum === num) ? "#ffffff" : (suggestionTarget ? "#334155" : "#ffffff");
-        svg += `<text x="${p.x}" y="${p.y}" fill="${numColor}" font-size="9" font-weight="900" font-family="'Inter', sans-serif" text-anchor="middle" dominant-baseline="central" transform="rotate(${angle}, ${p.x}, ${p.y})">${num}</text>`;
+        textSVG += `<text x="${p.x}" y="${p.y}" fill="${numColor}" font-size="9" font-weight="900" font-family="'Inter', sans-serif" text-anchor="middle" dominant-baseline="central" transform="rotate(${angle}, ${p.x}, ${p.y})">${num}</text>`;
       });
+      textSVG += `</g>`;
+      svg += textSVG;
 
-      // 繪製落點 (X)
+      // 5. 點擊感應區 (Invisible Overlays)
+      let overlays = ``;
+      // MISS 感應區 (外圍)
+      overlays += `<circle cx="0" cy="0" r="96.5" stroke="transparent" stroke-width="17" fill="none" class="dart-zone-stroke" onclick="window.handleThrow(0, 1, 'MISS')"></circle>`;
+      
+      for(let i=0; i<20; i++) {
+        const num = BOARD_NUMBERS[i];
+        const angle = i * 18;
+        const start = angle - 9;
+        const end = angle + 9;
+        // 點擊 Double
+        overlays += `<path d="${getWedgePath(0, 0, 80, 88, start, end)}" class="dart-zone" onclick="window.handleThrow(${num}, 2, 'D${num}')"></path>`;
+        // 點擊 Outer Single
+        overlays += `<path d="${getWedgePath(0, 0, 48, 80, start, end)}" class="dart-zone" onclick="window.handleThrow(${num}, 1, '${num}')"></path>`;
+        // 點擊 Triple
+        overlays += `<path d="${getWedgePath(0, 0, 40, 48, start, end)}" class="dart-zone" onclick="window.handleThrow(${num}, 3, 'T${num}')"></path>`;
+        // 點擊 Inner Single
+        overlays += `<path d="${getWedgePath(0, 0, 15, 40, start, end)}" class="dart-zone" onclick="window.handleThrow(${num}, 1, '${num}')"></path>`;
+      }
+      // Bullseyes
+      overlays += `<circle cx="0" cy="0" r="15" class="dart-zone" onclick="window.handleThrow(25, 1, 'S-BULL')"></circle>`;
+      overlays += `<circle cx="0" cy="0" r="6" class="dart-zone" onclick="window.handleThrow(50, 1, 'D-BULL')"></circle>`;
+      svg += overlays;
+
+      // 6. 繪製落點 (X) 紀錄
+      let hitsSVG = `<g pointer-events="none">`;
       const hitCounts = {};
       if (currentDarts && currentDarts.length > 0) {
         currentDarts.forEach((dart, dIdx) => {
@@ -326,7 +388,7 @@
             const px = targetGeom.center.x + offset;
             const py = targetGeom.center.y + (dart.label === 'MISS' ? 0 : offset);
             const strokeColor = (dart.isBust || dart.label === 'MISS') ? "rgba(255,255,255,0.4)" : "#ffffff";
-            svg += `
+            hitsSVG += `
               <g transform="translate(${px}, ${py})">
                 <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="${strokeColor}" stroke-width="0.8" stroke-linecap="round"></line>
                 <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="${strokeColor}" stroke-width="0.8" stroke-linecap="round"></line>
@@ -334,6 +396,9 @@
           }
         });
       }
+      hitsSVG += `</g>`;
+      svg += hitsSVG;
+
       return svg;
     };
 
@@ -451,11 +516,11 @@
       const disableAttr = isInputDisabled ? 'disabled="disabled" style="opacity:0.4"' : '';
       const numKeys = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
       const keypadHTML = numKeys.map(num => `
-        <div id="btn-${num}" class="bg-black rounded-lg overflow-hidden flex flex-col border border-neutral-800 h-[60px] sm:h-[68px] num-btn transition-colors duration-150">
+        <div id="btn-${num}" class="bg-black rounded-lg overflow-hidden flex flex-col border border-neutral-800 h-[60px] sm:h-[68px] num-btn">
           <button onclick="window.handleThrow(${num}, 1, '${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[16px] font-medium text-white">${num}</button>
           <div class="flex h-[28px] sm:h-[32px] border-t border-neutral-800">
-            <button onclick="window.handleThrow(${num}, 2, 'D${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-black border-r border-neutral-800">D</button>
-            <button onclick="window.handleThrow(${num}, 3, 'T${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-black">T</button>
+            <button onclick="window.handleThrow(${num}, 2, 'D${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-transparent border-r border-neutral-800">D</button>
+            <button onclick="window.handleThrow(${num}, 3, 'T${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-transparent">T</button>
           </div>
         </div>
       `).join('');
@@ -470,9 +535,9 @@
       const controlPanelHTML = gameState.winner ? winActionsHTML : `
         <div class="flex-none bg-black">
           <div class="flex gap-2 mb-2 px-4">
-            <button id="btn-sbull" onclick="window.handleThrow(25, 1, 'S-BULL', 'btn-sbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase transition-all">S-BULL</button>
-            <button id="btn-dbull" onclick="window.handleThrow(50, 1, 'D-BULL', 'btn-dbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase transition-all">D-BULL</button>
-            <button id="btn-miss" onclick="window.handleThrow(0, 1, 'MISS', 'btn-miss')" ${disableAttr} class="w-[72px] bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase transition-all">MISS</button>
+            <button id="btn-sbull" onclick="window.handleThrow(25, 1, 'S-BULL', 'btn-sbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn">S-BULL</button>
+            <button id="btn-dbull" onclick="window.handleThrow(50, 1, 'D-BULL', 'btn-dbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn">D-BULL</button>
+            <button id="btn-miss" onclick="window.handleThrow(0, 1, 'MISS', 'btn-miss')" ${disableAttr} class="w-[72px] bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn">MISS</button>
           </div>
           <div class="grid grid-cols-5 gap-2 px-4 pb-6 overflow-y-auto hide-scrollbar">${keypadHTML}</div>
         </div>
@@ -501,7 +566,8 @@
               </div>
 
               <div class="flex-1 flex items-center justify-center px-4 pt-0 min-h-0 overflow-hidden">
-                <svg viewBox="-105 -105 210 210" class="h-full w-auto max-w-full pointer-events-none">
+                <!-- 移除了 pointer-events-none，令標靶可以被點擊 -->
+                <svg viewBox="-105 -105 210 210" class="h-full w-auto max-w-full">
                   ${dynamicSVG}
                 </svg>
               </div>
