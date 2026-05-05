@@ -10,12 +10,20 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
   <!-- 引入 Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 設定 Tailwind：令 Hover 只在支援滑鼠的裝置上生效，解決手機 Sticky Hover 問題 -->
+  <script>
+    tailwind.config = {
+      future: {
+        hoverOnlyWhenSupported: true,
+      }
+    }
+  </script>
   <style>
     /* 隱藏滾動條 */
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     
-    /* 動畫效果 */
+    /* 動畫效果 - 已移除位移，改為原地透明度漸變 */
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     .animate-fade-in { animation: fadeIn 0.3s ease-out; }
 
@@ -31,6 +39,7 @@
       margin: 0;
     }
     
+    /* 使用 dvh (Dynamic Viewport Height) 確保在 Safari 工具列出現時自動縮放 */
     .app-container {
       height: 100vh;
       height: 100dvh;
@@ -39,23 +48,12 @@
       overflow: hidden;
     }
     
+    /* 消除按鈕預設點擊高光 */
     button { -webkit-tap-highlight-color: transparent; outline: none; }
     
-    /* 按鈕漸變動畫 (淡出用) */
-    .num-btn, .action-btn {
-      transition: background-color 0.4s ease-out, color 0.4s ease-out;
-    }
-    /* 手機版點擊回饋 (即刻變色，無延遲) */
-    .tap-active { 
-      background-color: #333333 !important; 
-      color: #ffffff !important; 
-      transition: none !important; 
-    }
-    .key-tap-active { 
-      background-color: #ffffff !important; 
-      color: #000000 !important; 
-      transition: none !important; 
-    }
+    /* 手機版點擊回饋樣式 */
+    .tap-active { background-color: #333333 !important; color: #ffffff !important; transition: background-color 0.1s; }
+    .key-tap-active { background-color: #ffffff !important; color: #000000 !important; }
 
     /* 標靶點擊感應區 */
     .dart-zone {
@@ -64,16 +62,30 @@
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
-    .dart-zone:hover, .dart-zone:active {
-      fill: rgba(255, 255, 255, 0.3);
+    /* 手機點擊時即時反光 */
+    .dart-zone:active {
+      fill: rgba(255, 255, 255, 0.4);
+      transition: none;
     }
+    
     .dart-zone-stroke {
       transition: stroke 0.2s ease-out;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
-    .dart-zone-stroke:hover, .dart-zone-stroke:active {
-      stroke: rgba(255, 255, 255, 0.15);
+    .dart-zone-stroke:active {
+      stroke: rgba(255, 255, 255, 0.3);
+      transition: none;
+    }
+
+    /* 只在支援 Hover 的裝置 (電腦) 啟用懸停效果 */
+    @media (hover: hover) {
+      .dart-zone:hover {
+        fill: rgba(255, 255, 255, 0.3);
+      }
+      .dart-zone-stroke:hover {
+        stroke: rgba(255, 255, 255, 0.15);
+      }
     }
   </style>
 </head>
@@ -84,7 +96,7 @@
   <script>
     // --- 系統常數 ---
     const GAME_MODES = ['X01', 'S-BULL']; 
-    const STARTING_SCORES = [301, 501, 701, 901, 1101, 1501];
+    const STARTING_SCORES = [301, 501, 701, 901, 1101, 1501, 'TARGET']; 
     const CHECKOUT_MODES = ['Single out', 'Master out', 'Double out'];
     const PLAYER_COUNTS = [1, 2, 3, 4];
     const BOARD_NUMBERS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
@@ -92,7 +104,7 @@
     // --- 工具函數 ---
     const cloneState = (state) => JSON.parse(JSON.stringify(state));
 
-    // 所有可能的目標，用於計算結算路徑
+    // --- DFS 結算路線算法 ---
     const ALL_TARGETS = [
       ...Array.from({length: 20}, (_, i) => 20 - i).map(i => ({v: i*3, l: `T${i}`, out: true})),
       {v: 50, l: 'D-BULL', out: true},
@@ -101,7 +113,6 @@
       ...Array.from({length: 20}, (_, i) => 20 - i).map(i => ({v: i, l: `${i}`, out: false}))
     ];
 
-    // DFS 結算算法
     const calculateCheckoutRoute = (score, dartsLeft, checkoutMode) => {
       if (score > 170 || score <= 0 || dartsLeft <= 0) return null;
       const isMasterOut = checkoutMode === 'Master out';
@@ -134,7 +145,12 @@
     let isMenuOpen = false;
     let menuJustOpened = false;
     let isRecordOpen = false;
-    let settings = { gameMode: 'X01', startingScore: 501, checkoutMode: 'Master out', playerCount: 2 };
+    
+    // 編輯分數/名字用嘅 State
+    let isEditModalOpen = false;
+    let editingPlayerIdx = null;
+
+    let settings = { gameMode: 'X01', startingScore: 501, checkoutMode: 'Master out', playerCount: 2, customNames: ['', '', '', ''] };
     let pendingSettings = null;
     let gameState = null;
     let historyStack = [];
@@ -144,6 +160,8 @@
     // --- 核心邏輯 ---
     window.openMenu = () => { 
       pendingSettings = cloneState(settings);
+      // 確保 customNames 陣列存在
+      if (!pendingSettings.customNames) pendingSettings.customNames = ['', '', '', ''];
       isMenuOpen = true; 
       menuJustOpened = true; 
       render(); 
@@ -161,8 +179,25 @@
     };
 
     window.setSetting = (key, value) => { 
-      if (pendingSettings) pendingSettings[key] = value; 
+      if (pendingSettings) {
+        // 如果目前係 TARGET 模式，鎖定唔准轉人數
+        if (key === 'playerCount' && pendingSettings.startingScore === 'TARGET') return;
+
+        pendingSettings[key] = value; 
+        
+        // 當選擇咗 TARGET 分數模式，強制變更為 1 人
+        if (key === 'startingScore' && value === 'TARGET') {
+          pendingSettings.playerCount = 1;
+        }
+      }
       render(); 
+    };
+
+    // 處理 Setting 頁入面嘅名字輸入 (唔呼叫 render 以免失去 Focus)
+    window.updatePendingName = (e, index) => {
+      if (pendingSettings) {
+        pendingSettings.customNames[index] = e.target.value;
+      }
     };
     
     window.initGame = () => {
@@ -170,14 +205,60 @@
       if (isMenuOpen && pendingSettings) {
         settings = cloneState(pendingSettings);
       }
-      const players = Array.from({ length: settings.playerCount }).map((_, i) => ({
-        id: i + 1, name: `Player ${i + 1}`, score: settings.startingScore, lastRoundScore: null, dartsThrown: 0, roundDarts: []
-      }));
-      gameState = { players, currentPlayerIndex: 0, currentRound: 1, currentTurnDarts: [], turnStartScore: settings.startingScore, winner: null, isBust: false, gameLog: [] };
+      
+      // 如果係 TARGET 模式，實際分數設定為 170
+      const actualStartScore = settings.startingScore === 'TARGET' ? 170 : settings.startingScore;
+      
+      const players = Array.from({ length: settings.playerCount }).map((_, i) => {
+        const defaultName = `Player ${i + 1}`;
+        const customName = settings.customNames[i];
+        // 如果無輸入，或者只係輸入空格，就用返預設名
+        const nameToUse = (customName && customName.trim() !== '') ? customName.trim() : defaultName;
+        return {
+          id: i + 1, name: nameToUse, score: actualStartScore, lastRoundScore: null, dartsThrown: 0, roundDarts: []
+        };
+      });
+      gameState = { players, currentPlayerIndex: 0, currentRound: 1, currentTurnDarts: [], turnStartScore: actualStartScore, winner: null, isBust: false, gameLog: [] };
       historyStack = [];
       lastDartLabel = "READY";
       isMenuOpen = false;
       isRecordOpen = false;
+      isEditModalOpen = false;
+      render();
+    };
+
+    // --- 玩家編輯彈窗邏輯 ---
+    window.openEditModal = (idx) => {
+      if (gameState.winner) return; // 完局後不允許修改
+      editingPlayerIdx = idx;
+      isEditModalOpen = true;
+      render();
+    };
+
+    window.closeEditModal = () => {
+      isEditModalOpen = false;
+      editingPlayerIdx = null;
+      render();
+    };
+
+    window.savePlayerEdit = () => {
+      const nameInput = document.getElementById('edit-player-name').value;
+      const scoreInput = parseInt(document.getElementById('edit-player-score').value, 10);
+      
+      if (nameInput && nameInput.trim() !== '') {
+        gameState.players[editingPlayerIdx].name = nameInput.trim();
+      }
+      
+      if (!isNaN(scoreInput) && scoreInput >= 0) {
+        gameState.players[editingPlayerIdx].score = scoreInput;
+        // 如果改緊當前玩家嘅分數，需要同步更新 turnStartScore 避免 bust 計算錯誤
+        if (editingPlayerIdx === gameState.currentPlayerIndex) {
+          gameState.turnStartScore = scoreInput;
+        }
+      }
+      
+      isEditModalOpen = false;
+      editingPlayerIdx = null;
       render();
     };
 
@@ -199,14 +280,39 @@
         const isNumKey = el.classList.contains('num-btn');
         const effectClass = isNumKey ? 'key-tap-active' : 'tap-active';
         el.classList.add(effectClass);
-        // Hold 150ms 之後再開始淡出
         setTimeout(() => {
           el.classList.remove(effectClass);
-        }, 150);
+        }, 500);
       }
     };
 
-    window.handleThrow = (score, multiplier, label, btnId) => {
+    // 處理標靶點擊並計算精確座標
+    window.handleBoardClick = (evt, score, multiplier, label) => {
+      const svg = evt.target.closest('svg');
+      let x, y;
+      let clientX = evt.clientX;
+      let clientY = evt.clientY;
+
+      if (evt.changedTouches && evt.changedTouches.length > 0) {
+          clientX = evt.changedTouches[0].clientX;
+          clientY = evt.changedTouches[0].clientY;
+      }
+
+      if (svg && clientX !== undefined) {
+          const pt = svg.createSVGPoint();
+          pt.x = clientX;
+          pt.y = clientY;
+          // 將屏幕點擊座標轉換為 SVG 內部座標 (-105 到 105)
+          const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
+          x = svgP.x;
+          y = svgP.y;
+      }
+
+      window.handleThrow(score, multiplier, label, null, (x !== undefined && y !== undefined) ? {x, y} : null);
+    };
+
+    // 加入 hitCoords 參數，完整處理投擲邏輯
+    window.handleThrow = (score, multiplier, label, btnId = null, hitCoords = null) => {
       if (!gameState || gameState.winner || gameState.isBust || gameState.currentTurnDarts.length >= 3) return;
       if (btnId) triggerTapEffect(btnId);
       if (timeoutRef) clearTimeout(timeoutRef);
@@ -232,7 +338,8 @@
         isBust = true; 
       }
 
-      const newDart = { label, points, multiplier, isBust };
+      // 將 hitCoords 存入 currentTurnDarts
+      const newDart = { label, points, multiplier, isBust, hitCoords };
       gameState.currentTurnDarts.push(newDart);
       gameState.players[gameState.currentPlayerIndex].roundDarts = [...gameState.currentTurnDarts];
 
@@ -240,7 +347,6 @@
         gameState.players[gameState.currentPlayerIndex].score = 0;
         gameState.winner = gameState.players[gameState.currentPlayerIndex].name;
         
-        // 紀錄勝利回合
         let roundObj = gameState.gameLog.find(r => r.round === gameState.currentRound);
         if (!roundObj) {
             roundObj = { round: gameState.currentRound, turns: [] };
@@ -270,7 +376,6 @@
       const currentPlayer = gameState.players[gameState.currentPlayerIndex];
       currentPlayer.lastRoundScore = gameState.isBust ? 0 : gameState.currentTurnDarts.reduce((acc, dart) => acc + dart.points, 0);
       
-      // 寫入當前回合紀錄 (Game Log)
       let roundObj = gameState.gameLog.find(r => r.round === gameState.currentRound);
       if (!roundObj) {
           roundObj = { round: gameState.currentRound, turns: [] };
@@ -279,7 +384,7 @@
       roundObj.turns.push({
           playerName: currentPlayer.name,
           darts: cloneState(gameState.currentTurnDarts),
-          scoreAfter: currentPlayer.score, // 爆分的話，分數已在 handleThrow 重設
+          scoreAfter: currentPlayer.score,
           isBust: gameState.isBust,
           isWin: false
       });
@@ -297,7 +402,6 @@
       render();
     };
 
-    // --- 飛鏢靶 SVG 工具 ---
     const polarToCartesian = (cx, cy, r, angleInDegrees) => {
       const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
       return { x: cx + (r * Math.cos(angleInRadians)), y: cy + (r * Math.sin(angleInRadians)) };
@@ -312,6 +416,7 @@
       return `M ${start1.x} ${start1.y} A ${r1} ${r1} 0 ${largeArcFlag} 0 ${end1.x} ${end1.y} L ${end2.x} ${end2.y} A ${r2} ${r2} 0 ${largeArcFlag} 1 ${start2.x} ${start2.y} Z`;
     };
 
+    // 支援大小寫無關匹配，確保 S-BULL / S-Bull 都能正確渲染
     const getTargetGeometry = (label) => {
       if (!label) return null;
       const upperLabel = label.toUpperCase();
@@ -321,9 +426,9 @@
       if (upperLabel === 'MISS') return { path: null, center: polarToCartesian(0, 0, 103, 0) };
 
       let type = 'S';
-      let numStr = label;
-      if (upperLabel.startsWith('D')) { type = 'D'; numStr = label.substring(1); }
-      else if (upperLabel.startsWith('T')) { type = 'T'; numStr = label.substring(1); }
+      let numStr = upperLabel;
+      if (upperLabel.startsWith('D')) { type = 'D'; numStr = upperLabel.substring(1); }
+      else if (upperLabel.startsWith('T')) { type = 'T'; numStr = upperLabel.substring(1); }
       
       const num = parseInt(numStr);
       const idx = BOARD_NUMBERS.indexOf(num);
@@ -344,18 +449,15 @@
       };
     };
 
-    // 生成互動式標靶 SVG
-    const generateDartboardSVG = (currentDarts, suggestionTarget) => {
-      // 1. 基底
+    // 加入 prevDarts 參數以渲染 Ghost Darts
+    const generateDartboardSVG = (currentDarts, suggestionTarget, prevDarts = []) => {
       let svg = `<circle cx="0" cy="0" r="105" fill="#000000"></circle>`;
       
-      // 2. 建議路徑提示
       if (suggestionTarget) {
         const targetGeom = getTargetGeometry(suggestionTarget);
         if (targetGeom && targetGeom.path) svg += `<g pointer-events="none">${targetGeom.path}</g>`;
       }
 
-      // 3. 繪製格線 (避免遮擋點擊，設置 pointer-events-none)
       let gridSVG = `<g pointer-events="none">`;
       [88, 80, 48, 40, 15, 6].forEach(r => {
         gridSVG += `<circle cx="0" cy="0" r="${r}" fill="none" stroke="#ffffff" stroke-width="0.5"></circle>`;
@@ -372,63 +474,82 @@
       gridSVG += `</g>`;
       svg += gridSVG;
 
-      // 4. 繪製數字 (避免遮擋點擊)
       let textSVG = `<g pointer-events="none">`;
       let targetBaseNum = null;
-      if (suggestionTarget && !suggestionTarget.includes('Bull')) {
+      if (suggestionTarget && !suggestionTarget.includes('Bull') && !suggestionTarget.includes('BULL')) {
         targetBaseNum = parseInt(suggestionTarget.replace(/[^0-9]/g, ''));
       }
       BOARD_NUMBERS.forEach((num, i) => {
         const angle = i * 18;
         const p = polarToCartesian(0, 0, 95, angle);
         let numColor = (targetBaseNum === num) ? "#ffffff" : (suggestionTarget ? "#334155" : "#ffffff");
-        textSVG += `<text x="${p.x}" y="${p.y}" fill="${numColor}" font-size="9" font-weight="900" font-family="'Inter', sans-serif" text-anchor="middle" dominant-baseline="central" transform="rotate(${angle}, ${p.x}, ${p.y})">${num}</text>`;
+        // 數字縮細至 7 並調幼至 font-weight="700"
+        textSVG += `<text x="${p.x}" y="${p.y}" fill="${numColor}" font-size="7" font-weight="700" font-family="'Inter', sans-serif" text-anchor="middle" dominant-baseline="central" transform="rotate(${angle}, ${p.x}, ${p.y})">${num}</text>`;
       });
       textSVG += `</g>`;
       svg += textSVG;
 
-      // 5. 點擊感應區 (Invisible Overlays)
       let overlays = ``;
-      // MISS 感應區 (外圍)
-      overlays += `<circle cx="0" cy="0" r="96.5" stroke="transparent" stroke-width="17" fill="none" class="dart-zone-stroke" onclick="window.handleThrow(0, 1, 'MISS')"></circle>`;
-      
+      overlays += `<circle cx="0" cy="0" r="96.5" stroke="transparent" stroke-width="17" fill="none" class="dart-zone-stroke" onclick="window.handleBoardClick(event, 0, 1, 'MISS')"></circle>`;
       for(let i=0; i<20; i++) {
         const num = BOARD_NUMBERS[i];
         const angle = i * 18;
         const start = angle - 9;
         const end = angle + 9;
-        // 點擊 Double
-        overlays += `<path d="${getWedgePath(0, 0, 80, 88, start, end)}" class="dart-zone" onclick="window.handleThrow(${num}, 2, 'D${num}')"></path>`;
-        // 點擊 Outer Single
-        overlays += `<path d="${getWedgePath(0, 0, 48, 80, start, end)}" class="dart-zone" onclick="window.handleThrow(${num}, 1, '${num}')"></path>`;
-        // 點擊 Triple
-        overlays += `<path d="${getWedgePath(0, 0, 40, 48, start, end)}" class="dart-zone" onclick="window.handleThrow(${num}, 3, 'T${num}')"></path>`;
-        // 點擊 Inner Single
-        overlays += `<path d="${getWedgePath(0, 0, 15, 40, start, end)}" class="dart-zone" onclick="window.handleThrow(${num}, 1, '${num}')"></path>`;
+        overlays += `<path d="${getWedgePath(0, 0, 80, 88, start, end)}" class="dart-zone" onclick="window.handleBoardClick(event, ${num}, 2, 'D${num}')"></path>`;
+        overlays += `<path d="${getWedgePath(0, 0, 48, 80, start, end)}" class="dart-zone" onclick="window.handleBoardClick(event, ${num}, 1, '${num}')"></path>`;
+        overlays += `<path d="${getWedgePath(0, 0, 40, 48, start, end)}" class="dart-zone" onclick="window.handleBoardClick(event, ${num}, 3, 'T${num}')"></path>`;
+        overlays += `<path d="${getWedgePath(0, 0, 15, 40, start, end)}" class="dart-zone" onclick="window.handleBoardClick(event, ${num}, 1, '${num}')"></path>`;
       }
-      // Bullseyes
-      overlays += `<circle cx="0" cy="0" r="15" class="dart-zone" onclick="window.handleThrow(25, 1, 'S-BULL')"></circle>`;
-      overlays += `<circle cx="0" cy="0" r="6" class="dart-zone" onclick="window.handleThrow(50, 1, 'D-BULL')"></circle>`;
+      overlays += `<circle cx="0" cy="0" r="15" class="dart-zone" onclick="window.handleBoardClick(event, 25, 1, 'S-BULL')"></circle>`;
+      overlays += `<circle cx="0" cy="0" r="6" class="dart-zone" onclick="window.handleBoardClick(event, 50, 1, 'D-BULL')"></circle>`;
       svg += overlays;
 
-      // 6. 繪製落點 (X) 紀錄
       let hitsSVG = `<g pointer-events="none">`;
+      
+      // 繪製上一局的淡色紀錄 (Ghost Darts)
+      if (prevDarts && prevDarts.length > 0) {
+        prevDarts.forEach((dart, dIdx) => {
+          let px, py;
+          if (dart.hitCoords) {
+            px = dart.hitCoords.x;
+            py = dart.hitCoords.y;
+          } else {
+            const targetGeom = getTargetGeometry(dart.label);
+            if (!targetGeom) return;
+            const offset = dart.label === 'MISS' ? (dIdx * 6 - 6) : 0; 
+            px = targetGeom.center.x + offset;
+            py = targetGeom.center.y + (dart.label === 'MISS' ? 0 : offset);
+          }
+          hitsSVG += `
+            <g transform="translate(${px}, ${py})">
+              <image href="./assets/x.svg" x="-3" y="-3" width="6" height="6" opacity="0.3" />
+            </g>`;
+        });
+      }
+
+      // 繪製當前這局的紀錄
       const hitCounts = {};
       if (currentDarts && currentDarts.length > 0) {
         currentDarts.forEach((dart, dIdx) => {
-          const targetGeom = getTargetGeometry(dart.label);
-          if (targetGeom) {
+          let px, py;
+          if (dart.hitCoords) {
+            px = dart.hitCoords.x;
+            py = dart.hitCoords.y;
+          } else {
+            const targetGeom = getTargetGeometry(dart.label);
+            if (!targetGeom) return;
             hitCounts[dart.label] = (hitCounts[dart.label] || 0) + 1;
             const offset = dart.label === 'MISS' ? (dIdx * 6 - 6) : (hitCounts[dart.label] - 1) * 3; 
-            const px = targetGeom.center.x + offset;
-            const py = targetGeom.center.y + (dart.label === 'MISS' ? 0 : offset);
-            const strokeColor = (dart.isBust || dart.label === 'MISS') ? "rgba(255,255,255,0.4)" : "#ffffff";
-            hitsSVG += `
-              <g transform="translate(${px}, ${py})">
-                <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="${strokeColor}" stroke-width="0.8" stroke-linecap="round"></line>
-                <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="${strokeColor}" stroke-width="0.8" stroke-linecap="round"></line>
-              </g>`;
+            px = targetGeom.center.x + offset;
+            py = targetGeom.center.y + (dart.label === 'MISS' ? 0 : offset);
           }
+          
+          const opacityValue = dart.isBust ? "0.4" : "1";
+          hitsSVG += `
+            <g transform="translate(${px}, ${py})">
+              <image href="./assets/x.svg" x="-3" y="-3" width="6" height="6" opacity="${opacityValue}" />
+            </g>`;
         });
       }
       hitsSVG += `</g>`;
@@ -437,7 +558,6 @@
       return svg;
     };
 
-
     function render() {
       if (!gameState) return;
       const appDiv = document.getElementById('app');
@@ -445,92 +565,122 @@
       let statusBannerHTML = '';
       let nextTarget = null;
       
-      // 狀態列顯示邏輯
       if (gameState.winner) {
-        statusBannerHTML = `<div class="w-full bg-[#967d54] rounded-lg py-3.5 flex items-center justify-center font-bold text-[13px] tracking-[0.15em] text-white uppercase animate-pulse shadow-lg">${gameState.winner} WIN!!!</div>`;
+        statusBannerHTML = `<div class="w-full bg-[#967d54] rounded-lg py-3.5 flex items-center justify-center font-bold text-[13px] lg:text-[17px] tracking-[0.15em] text-white uppercase animate-pulse shadow-lg">${gameState.winner} WIN!!!</div>`;
       } else if (gameState.isBust) {
-        statusBannerHTML = `<div class="w-full bg-[#6a0404] rounded-lg py-3.5 flex items-center justify-between px-6 font-bold text-[13px] tracking-[0.15em] text-white uppercase shadow-lg"><span>TURN. ${gameState.players[gameState.currentPlayerIndex].name}</span><span>BUST</span></div>`;
+        statusBannerHTML = `<div class="w-full bg-[#6a0404] rounded-lg py-3.5 flex items-center justify-between px-6 font-bold text-[13px] lg:text-[17px] tracking-[0.15em] text-white uppercase shadow-lg"><span>TURN. ${gameState.players[gameState.currentPlayerIndex].name}</span><span>BUST</span></div>`;
       } else {
         const route = calculateCheckoutRoute(gameState.players[gameState.currentPlayerIndex].score, 3 - gameState.currentTurnDarts.length, settings.checkoutMode);
         if (route) {
           nextTarget = route[0];
-          const routeWithArrows = route.join(` <img src="./assets/arrow.svg" alt="->" class="h-[8px] inline-block mx-1.5 opacity-60"> `);
+          const routeWithArrows = route.join(` <img src="./assets/arrow.svg" alt="->" class="h-[8px] lg:h-[10px] inline-block mx-1.5 opacity-60"> `);
           statusBannerHTML = `
-            <div class="w-full bg-white rounded-lg py-3 px-6 flex justify-between items-center font-bold text-[13px] tracking-[0.15em] text-black uppercase animate-fade-in shadow-[0_0_15px_rgba(255,255,255,0.15)]">
+            <div class="w-full bg-white rounded-lg py-3 lg:py-4 px-6 flex justify-between items-center font-bold text-[13px] lg:text-[17px] tracking-[0.15em] text-black uppercase animate-fade-in shadow-[0_0_15px_rgba(255,255,255,0.15)]">
               <span>TARGET</span>
               <span class="flex items-center">${routeWithArrows}</span>
             </div>`;
         } else {
           const labelColor = lastDartLabel === "READY" ? "text-neutral-500" : "text-white";
           statusBannerHTML = `
-            <div class="w-full bg-[#111111] rounded-lg py-3.5 flex items-center justify-between px-6 font-medium text-[12px] tracking-[0.15em] text-neutral-300 uppercase border border-neutral-800">
+            <div class="w-full bg-[#111111] rounded-lg py-3.5 lg:py-4 flex items-center justify-between px-6 font-medium text-[12px] lg:text-[16px] tracking-[0.15em] text-neutral-300 uppercase border border-neutral-800">
               <span>TURN. ${gameState.players[gameState.currentPlayerIndex].name}</span>
               <span class="${labelColor} font-bold transition-colors duration-200">${lastDartLabel}</span>
             </div>`;
         }
       }
 
-      const dynamicSVG = generateDartboardSVG(gameState.currentTurnDarts, nextTarget);
+      // 計算當前玩家上一局嘅飛鏢紀錄 (Ghost Darts)
+      let prevDarts = [];
+      if (gameState.players.length > 0) {
+        const curPlayerName = gameState.players[gameState.currentPlayerIndex].name;
+        // 倒序搜尋 gameLog 搵最近一次屬於呢個 player 嘅紀錄
+        for (let i = gameState.gameLog.length - 1; i >= 0; i--) {
+          const roundObj = gameState.gameLog[i];
+          const turn = roundObj.turns.slice().reverse().find(t => t.playerName === curPlayerName);
+          if (turn && turn.darts) {
+              prevDarts = turn.darts;
+              break;
+          }
+        }
+      }
+
+      // 將 prevDarts 傳入去 SVG 生成器
+      const dynamicSVG = generateDartboardSVG(gameState.currentTurnDarts, nextTarget, prevDarts);
       
-      // 選單渲染
       const menuHTML = isMenuOpen ? `
-        <div class="fixed inset-0 z-50 bg-black flex flex-col px-6 py-8 overflow-y-auto ${menuJustOpened ? 'animate-fade-in' : ''}">
-          <div class="flex justify-between items-center mb-8 shrink-0">
-            <img src="./assets/Logo.svg" alt="Target" class="h-[19px] object-contain opacity-90">
-            <button onclick="window.cancelMenu()" class="text-white text-[11px] font-medium tracking-[0.15em] uppercase hover:text-neutral-300 transition-colors">CANCEL</button>
-          </div>
-          <div class="flex-1 flex flex-col items-center justify-center gap-10 pb-10">
-            <div class="w-full max-w-[340px] flex flex-col items-center gap-4">
-              <div class="text-neutral-500 text-[10px] font-medium tracking-[0.15em] uppercase">GAME MODE</div>
+        <div class="fixed inset-0 z-50 bg-black flex flex-col overflow-y-auto ${menuJustOpened ? 'animate-fade-in' : ''}">
+          <!-- 同步 Menu Header 到 w-full px-5 lg:px-12 -->
+          <header class="flex-none pt-6 pb-2 px-5 lg:px-12 flex items-start justify-between z-30 w-full shrink-0">
+            <div class="flex items-start"><img src="./assets/Logo.svg" alt="Target" class="h-[19px] lg:h-[25px] object-contain opacity-90"></div>
+            <button onclick="window.cancelMenu()" class="text-white text-[11px] lg:text-[14px] font-medium tracking-[0.15em] uppercase hover:text-neutral-300 active:text-neutral-500 transition-colors pt-1 lg:pt-1.5">CANCEL</button>
+          </header>
+          <!-- Menu 內容區置中 -->
+          <div class="flex-1 flex flex-col items-center justify-center gap-8 pb-10 px-6 w-full mt-4 lg:mt-0">
+            <div class="w-full max-w-[340px] lg:max-w-[440px] flex flex-col items-center gap-3">
+              <div class="text-neutral-500 text-[10px] lg:text-[13px] font-medium tracking-[0.15em] uppercase">GAME MODE</div>
               <div class="flex w-full gap-2">
                 ${GAME_MODES.map(m => {
-                  const activeClass = pendingSettings.gameMode === m ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900';
-                  return `<button onclick="window.setSetting('gameMode', '${m}')" class="flex-1 py-3.5 rounded-lg text-[11px] tracking-[0.15em] uppercase transition-all ${activeClass}">${m}</button>`;
+                  const activeClass = pendingSettings.gameMode === m ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900 active:bg-neutral-800';
+                  return `<button onclick="window.setSetting('gameMode', '${m}')" class="flex-1 py-3.5 lg:py-4 rounded-lg text-[11px] lg:text-[14px] tracking-[0.15em] uppercase transition-all ${activeClass}">${m}</button>`;
                 }).join('')}
               </div>
             </div>
-            <div class="w-full max-w-[340px] flex flex-col items-center gap-4">
-              <div class="text-neutral-500 text-[10px] font-medium tracking-[0.15em] uppercase">START SCORE</div>
+
+            <div class="w-full max-w-[340px] lg:max-w-[440px] flex flex-col items-center gap-3">
+              <div class="text-neutral-500 text-[10px] lg:text-[13px] font-medium tracking-[0.15em] uppercase">START SCORE</div>
               <div class="flex flex-wrap justify-center w-full gap-2">
                 ${STARTING_SCORES.map(s => {
-                  const activeClass = pendingSettings.startingScore === s ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900';
-                  return `<button onclick="window.setSetting('startingScore', ${s})" style="flex: 0 0 calc(25% - 6px);" class="py-3.5 rounded-lg text-[11px] tracking-[0.15em] uppercase transition-all ${activeClass}">${s}</button>`;
+                  const activeClass = pendingSettings.startingScore === s ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900 active:bg-neutral-800';
+                  const valStr = typeof s === 'string' ? "'" + s + "'" : s;
+                  return `<button onclick="window.setSetting('startingScore', ${valStr})" style="flex: 0 0 calc(25% - 6px);" class="py-3.5 lg:py-4 rounded-lg text-[11px] lg:text-[14px] tracking-[0.15em] uppercase transition-all ${activeClass}">${s}</button>`;
                 }).join('')}
               </div>
             </div>
-            <div class="w-full max-w-[340px] flex flex-col items-center gap-4">
-              <div class="text-neutral-500 text-[10px] font-medium tracking-[0.15em] uppercase">CHECKOUT</div>
+
+            <div class="w-full max-w-[340px] lg:max-w-[440px] flex flex-col items-center gap-3">
+              <div class="text-neutral-500 text-[10px] lg:text-[13px] font-medium tracking-[0.15em] uppercase">CHECKOUT</div>
               <div class="flex w-full gap-2">
                 ${CHECKOUT_MODES.map(m => {
                   const label = m.replace(' out', '').toUpperCase();
                   const isActive = pendingSettings.checkoutMode === m;
-                  const activeClass = isActive ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900';
-                  return `<button onclick="window.setSetting('checkoutMode', '${m}')" class="flex-1 py-3.5 rounded-lg text-[11px] tracking-[0.15em] uppercase transition-all ${activeClass}">${label}</button>`;
+                  const activeClass = isActive ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900 active:bg-neutral-800';
+                  return `<button onclick="window.setSetting('checkoutMode', '${m}')" class="flex-1 py-3.5 lg:py-4 rounded-lg text-[11px] lg:text-[14px] tracking-[0.15em] uppercase transition-all ${activeClass}">${label}</button>`;
                 }).join('')}
               </div>
             </div>
-            <div class="w-full max-w-[340px] flex flex-col items-center gap-4">
-              <div class="text-neutral-500 text-[10px] font-medium tracking-[0.15em] uppercase">PLAYERS</div>
+
+            <div class="w-full max-w-[340px] lg:max-w-[440px] flex flex-col items-center gap-3">
+              <div class="text-neutral-500 text-[10px] lg:text-[13px] font-medium tracking-[0.15em] uppercase">PLAYERS</div>
               <div class="flex w-full gap-2">
                 ${PLAYER_COUNTS.map(p => {
-                  const activeClass = pendingSettings.playerCount === p ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900';
-                  return `<button onclick="window.setSetting('playerCount', ${p})" class="flex-1 py-3.5 rounded-lg text-[11px] tracking-[0.15em] uppercase transition-all ${activeClass}">${p}</button>`;
+                  const isLocked = pendingSettings.startingScore === 'TARGET' && p !== 1;
+                  const activeClass = pendingSettings.playerCount === p ? 'bg-white text-black font-bold' : 'bg-black text-white font-medium border border-neutral-800 hover:bg-neutral-900 active:bg-neutral-800';
+                  const lockStyle = isLocked ? 'opacity:0.3; cursor:not-allowed;' : '';
+                  return `<button onclick="window.setSetting('playerCount', ${p})" style="${lockStyle}" class="flex-1 py-3.5 lg:py-4 rounded-lg text-[11px] lg:text-[14px] tracking-[0.15em] uppercase transition-all ${activeClass}">${p}</button>`;
                 }).join('')}
               </div>
+              <div class="flex flex-col w-full gap-2 mt-2">
+                ${Array.from({ length: pendingSettings.playerCount }).map((_, i) => `
+                  <input type="text"
+                         placeholder="Player ${i + 1}"
+                         value="${pendingSettings.customNames[i] || ''}"
+                         oninput="window.updatePendingName(event, ${i})"
+                         class="w-full bg-black border border-neutral-800 rounded-lg py-3 lg:py-4 px-4 text-[12px] lg:text-[16px] text-white placeholder-neutral-600 focus:border-white focus:outline-none transition-colors" />
+                `).join('')}
+              </div>
             </div>
-            <div class="w-full max-w-[340px] mt-2">
-              <button onclick="window.initGame()" class="w-full bg-white hover:bg-neutral-200 text-black py-4 rounded-lg font-bold tracking-[0.15em] text-[12px] uppercase transition-all active:scale-95">NEW GAME</button>
+
+            <div class="w-full max-w-[340px] lg:max-w-[440px] mt-2">
+              <button onclick="window.initGame()" class="w-full bg-white hover:bg-neutral-200 active:bg-neutral-300 text-black py-4 lg:py-5 rounded-lg font-bold tracking-[0.15em] text-[12px] lg:text-[16px] uppercase transition-all">NEW GAME</button>
             </div>
           </div>
         </div>
       ` : '';
 
-      // 紀錄卡面渲染 (Record Page)
       let recordHTML = '';
       if (isRecordOpen) {
         let displayLog = cloneState(gameState.gameLog);
         
-        // 如果當前遊戲進行中，將「正在掟緊」嘅回合動態加入紀錄版面，方便查看
         if (!gameState.winner) {
             let liveRound = displayLog.find(r => r.round === gameState.currentRound);
             if (!liveRound) {
@@ -550,34 +700,34 @@
             let turnsHTML = round.turns.map(turn => {
                 let dartsCells = [0, 1, 2].map(i => {
                     let dart = turn.darts[i];
-                    if (!dart) return `<div class="w-7 h-7 sm:w-8 sm:h-8 rounded border border-neutral-800 ${turn.isLive ? 'bg-neutral-900/40' : 'bg-neutral-900'} flex items-center justify-center text-neutral-600 text-[10px] font-medium">-</div>`;
+                    if (!dart) return `<div class="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded border border-neutral-800 ${turn.isLive ? 'bg-neutral-900/40' : 'bg-neutral-900'} flex items-center justify-center text-neutral-600 text-[10px] lg:text-[13px] font-medium">-</div>`;
                     let content = dart.isBust ? 'X' : dart.label;
                     let colorClass = dart.isBust ? 'text-red-500' : 'text-white';
-                    return `<div class="w-7 h-7 sm:w-8 sm:h-8 rounded border border-neutral-700 bg-neutral-800 flex items-center justify-center ${colorClass} text-[10px] font-medium">${content}</div>`;
+                    return `<div class="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded border border-neutral-700 bg-neutral-800 flex items-center justify-center ${colorClass} text-[10px] lg:text-[13px] font-medium">${content}</div>`;
                 }).join('');
 
                 let opClass = turn.isLive ? 'opacity-60 animate-pulse' : 'opacity-100';
-                let bustLabel = turn.isBust ? `<span class="text-[8px] text-red-500 bg-red-500/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">BUST</span>` : '';
-                let winLabel = turn.isWin ? `<span class="text-[8px] text-[#967d54] bg-[#967d54]/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">WIN</span>` : '';
+                let bustLabel = turn.isBust ? `<span class="text-[8px] lg:text-[10px] text-red-500 bg-red-500/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">BUST</span>` : '';
+                let winLabel = turn.isWin ? `<span class="text-[8px] lg:text-[10px] text-[#967d54] bg-[#967d54]/10 px-1 py-0.5 rounded font-bold uppercase tracking-wider">WIN</span>` : '';
 
                 return `
-                <div class="flex items-center justify-between py-3 border-b border-neutral-800/50 last:border-0 ${opClass}">
-                    <div class="flex flex-col w-[80px] sm:w-[100px]">
-                        <div class="text-[11px] font-medium text-neutral-300 truncate tracking-wide">${turn.playerName}</div>
+                <div class="flex items-center justify-between py-3 lg:py-4 border-b border-neutral-800/50 last:border-0 ${opClass}">
+                    <div class="flex flex-col w-[80px] sm:w-[100px] lg:w-[140px]">
+                        <div class="text-[11px] lg:text-[14px] font-medium text-neutral-300 truncate tracking-wide">${turn.playerName}</div>
                         ${bustLabel ? `<div class="mt-1">${bustLabel}</div>` : ''}
                         ${winLabel ? `<div class="mt-1">${winLabel}</div>` : ''}
                     </div>
-                    <div class="flex gap-1.5 flex-1 justify-center">
+                    <div class="flex gap-1.5 lg:gap-2 flex-1 justify-center">
                         ${dartsCells}
                     </div>
-                    <div class="text-[14px] font-bold ${turn.isWin ? 'text-[#967d54]' : 'text-white'} w-[45px] text-right">${turn.scoreAfter}</div>
+                    <div class="text-[14px] lg:text-[18px] font-bold ${turn.isWin ? 'text-[#967d54]' : 'text-white'} w-[45px] lg:w-[60px] text-right">${turn.scoreAfter}</div>
                 </div>
                 `;
             }).join('');
 
             return `
-            <div class="bg-[#111] rounded-lg p-4 border border-neutral-800 shadow-sm">
-                <div class="text-[10px] font-bold tracking-[0.15em] text-neutral-500 mb-2 uppercase border-b border-neutral-800 pb-2">ROUND ${round.round}</div>
+            <div class="bg-[#111] rounded-lg p-4 lg:p-6 border border-neutral-800 shadow-sm">
+                <div class="text-[10px] lg:text-[13px] font-bold tracking-[0.15em] text-neutral-500 mb-2 lg:mb-4 uppercase border-b border-neutral-800 pb-2 lg:pb-3">ROUND ${round.round}</div>
                 <div class="flex flex-col">
                     ${turnsHTML}
                 </div>
@@ -586,118 +736,161 @@
         }).join('');
 
         if(displayLog.length === 0) {
-          logContent = `<div class="flex-1 flex items-center justify-center text-neutral-500 text-xs tracking-widest uppercase">No Records Yet</div>`;
+          logContent = `<div class="flex-1 flex items-center justify-center text-neutral-500 text-xs lg:text-[14px] tracking-widest uppercase">No Records Yet</div>`;
         }
 
         recordHTML = `
-        <div class="fixed inset-0 z-50 bg-black flex flex-col px-5 py-8 overflow-hidden animate-fade-in">
-          <div class="flex justify-between items-center mb-5 shrink-0 pb-4 border-b border-neutral-800">
+        <div class="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden animate-fade-in">
+          <!-- 同步 Record Header 到 w-full px-5 lg:px-12 -->
+          <header class="flex-none pt-6 pb-4 px-5 lg:px-12 flex items-start justify-between z-30 w-full border-b border-neutral-800 shrink-0">
             <div class="flex items-center gap-2.5">
-               <img src="./assets/record.svg" alt="Record" class="h-[14px] object-contain opacity-80">
-               <span class="text-white font-bold tracking-[0.15em] text-[12px] uppercase">Match Record</span>
+               <img src="./assets/record.svg" alt="Record" class="h-[14px] lg:h-[18px] object-contain opacity-80">
+               <span class="text-white font-bold tracking-[0.15em] text-[12px] lg:text-[16px] uppercase pt-0.5">Match Record</span>
             </div>
-            <button onclick="window.toggleRecord()" class="text-neutral-400 text-[11px] font-medium tracking-[0.15em] uppercase hover:text-white transition-colors py-2 pl-4">CLOSE</button>
-          </div>
-          <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col gap-4 pb-10">
+            <button onclick="window.toggleRecord()" class="text-neutral-400 text-[11px] lg:text-[14px] font-medium tracking-[0.15em] uppercase hover:text-white active:text-white transition-colors pt-1 lg:pt-1.5">CLOSE</button>
+          </header>
+          <!-- Record 內容區置中 -->
+          <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col gap-4 lg:gap-6 pt-6 pb-10 px-5 lg:px-0 max-w-[800px] w-full mx-auto">
             ${logContent}
           </div>
         </div>
         `;
       }
 
-      // 玩家資訊卡渲染
+      let editModalHTML = '';
+      if (isEditModalOpen && editingPlayerIdx !== null) {
+        editModalHTML = `
+        <div class="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center px-6 animate-fade-in">
+          <div class="bg-[#111] border border-neutral-800 rounded-xl w-full max-w-[320px] lg:max-w-[400px] p-6 lg:p-8 flex flex-col gap-5 lg:gap-6">
+            <div class="text-white font-bold text-[14px] lg:text-[18px] tracking-[0.15em] uppercase text-center">EDIT PLAYER</div>
+            <div class="flex flex-col gap-4">
+              <div>
+                <div class="text-neutral-500 text-[10px] lg:text-[13px] font-medium tracking-[0.15em] uppercase mb-2">Name</div>
+                <input id="edit-player-name" type="text" value="${gameState.players[editingPlayerIdx].name}" class="w-full bg-black border border-neutral-700 rounded-lg py-3.5 px-4 text-white text-[13px] lg:text-[17px] focus:border-white focus:outline-none transition-colors" />
+              </div>
+              <div>
+                <div class="text-neutral-500 text-[10px] lg:text-[13px] font-medium tracking-[0.15em] uppercase mb-2">Score</div>
+                <input id="edit-player-score" type="number" value="${gameState.players[editingPlayerIdx].score}" class="w-full bg-black border border-neutral-700 rounded-lg py-3.5 px-4 text-white text-[16px] lg:text-[20px] font-bold focus:border-white focus:outline-none transition-colors" />
+              </div>
+            </div>
+            <div class="flex gap-3 mt-2 lg:mt-4">
+              <button onclick="window.closeEditModal()" class="flex-1 py-3.5 lg:py-4 rounded-lg border border-neutral-800 text-neutral-400 font-medium text-[11px] lg:text-[14px] tracking-[0.15em] uppercase hover:text-white hover:bg-neutral-900 transition-colors">CANCEL</button>
+              <button onclick="window.savePlayerEdit()" class="flex-1 py-3.5 lg:py-4 rounded-lg bg-white text-black font-bold text-[11px] lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-200 transition-colors">SAVE</button>
+            </div>
+          </div>
+        </div>
+        `;
+      }
+
+      // Responsive Grid Cols for Players
       const gridColsClass = `grid-cols-${settings.playerCount}`;
-      const playersCardsHTML = `<div class="grid ${gridColsClass} gap-2 px-4 w-full">` + gameState.players.map((player, idx) => {
+      const playersCardsHTML = `<div class="grid ${gridColsClass} gap-2 px-4 lg:px-6 w-full">` + gameState.players.map((player, idx) => {
         const isActive = idx === gameState.currentPlayerIndex && !gameState.winner;
         let dartsHTML = [0, 1, 2].map(dartIdx => {
           const dart = player.roundDarts[dartIdx];
-          let boxClass = 'border-neutral-800 text-neutral-600'; 
-          if (isActive) { boxClass = dart ? 'border-white text-white' : 'border-neutral-500'; }
-          else if (dart) { boxClass = 'border-neutral-600 text-neutral-400'; }
-          let content = dart ? (dart.isBust ? 'X' : (dart.points || dart.label)) : (isActive && dartIdx === gameState.currentTurnDarts.length ? `<div class="w-1.5 h-1.5 bg-white rounded-full"></div>` : '');
-          return `<div class="flex-1 aspect-square max-w-[28px] max-h-[28px] rounded border ${boxClass} flex items-center justify-center text-[10px] font-medium uppercase overflow-hidden">${content}</div>`;
+          let boxClass = 'border-neutral-700 text-neutral-500'; 
+          if (isActive) { boxClass = dart ? 'border-white text-white' : 'border-neutral-400'; }
+          else if (dart) { boxClass = 'border-neutral-500 text-neutral-300'; }
+          let content = dart ? (dart.isBust ? 'X' : (dart.points || dart.label)) : (isActive && dartIdx === gameState.currentTurnDarts.length ? `<div class="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-white rounded-full"></div>` : '');
+          return `<div class="flex-1 aspect-square max-w-[28px] max-h-[28px] lg:max-w-[36px] lg:max-h-[36px] rounded border ${boxClass} flex items-center justify-center text-[10px] lg:text-[12px] font-medium uppercase overflow-hidden">${content}</div>`;
         }).join('');
         return `
-          <div class="flex flex-col items-center justify-end transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-30'}">
-            <div class="text-[clamp(1rem,6vw,1.8rem)] font-medium tracking-[0.08em] leading-none mb-1.5 ${gameState.winner === player.name ? 'text-[#967d54]' : 'text-white'}">${player.score}</div>
-            <div class="text-[8px] sm:text-[10px] text-neutral-400 font-medium uppercase tracking-[0.1em] mb-2 whitespace-nowrap">${player.name}</div>
-            <div class="flex gap-1 w-full justify-center">${dartsHTML}</div>
+          <div onclick="window.openEditModal(${idx})" class="flex flex-col items-center justify-end transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-60'} cursor-pointer active:scale-95 hover:bg-neutral-900/30 rounded-lg py-1 lg:py-2">
+            <div class="text-[clamp(1.2rem,5vw,1.8rem)] lg:text-[2.5rem] font-medium tracking-[0.08em] leading-none mb-1.5 lg:mb-3 ${gameState.winner === player.name ? 'text-[#967d54]' : 'text-white'}">${player.score}</div>
+            <div class="text-[8px] sm:text-[10px] lg:text-[12px] text-neutral-400 font-medium uppercase tracking-[0.1em] mb-2 lg:mb-3 whitespace-nowrap">${player.name}</div>
+            <div class="flex gap-1 lg:gap-2 w-full justify-center">${dartsHTML}</div>
           </div>
         `;
       }).join('') + `</div>`;
 
-      // 鍵盤渲染 - 加入 hover:bg-neutral-800
+      // 替所有按鈕加入 active:bg-neutral-700 以及 lg: 斷點放大高度
       const isInputDisabled = !!gameState.winner || gameState.isBust || gameState.currentTurnDarts.length >= 3;
       const disableAttr = isInputDisabled ? 'disabled="disabled" style="opacity:0.4"' : '';
       const numKeys = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
       const keypadHTML = numKeys.map(num => `
-        <div id="btn-${num}" class="bg-black rounded-lg overflow-hidden flex flex-col border border-neutral-800 h-[60px] sm:h-[68px] num-btn transition-colors duration-150">
-          <button onclick="window.handleThrow(${num}, 1, '${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[16px] font-medium text-white hover:bg-neutral-800 transition-colors">${num}</button>
-          <div class="flex h-[28px] sm:h-[32px] border-t border-neutral-800">
-            <button onclick="window.handleThrow(${num}, 2, 'D${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-transparent border-r border-neutral-800 hover:bg-neutral-800 hover:text-white transition-colors">D</button>
-            <button onclick="window.handleThrow(${num}, 3, 'T${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] font-medium text-neutral-500 bg-transparent hover:bg-neutral-800 hover:text-white transition-colors">T</button>
+        <div id="btn-${num}" class="bg-black rounded-lg overflow-hidden flex flex-col border border-neutral-800 h-[60px] sm:h-[68px] lg:h-[72px]">
+          <button onclick="window.handleThrow(${num}, 1, '${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[16px] lg:text-[18px] font-medium text-white hover:bg-neutral-800 active:bg-neutral-700 active:text-white transition-colors">${num}</button>
+          <div class="flex h-[28px] sm:h-[32px] lg:h-[36px] border-t border-neutral-800">
+            <button onclick="window.handleThrow(${num}, 2, 'D${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] lg:text-[11px] font-medium text-neutral-500 bg-transparent border-r border-neutral-800 hover:bg-neutral-800 hover:text-white active:bg-neutral-700 active:text-white transition-colors">D</button>
+            <button onclick="window.handleThrow(${num}, 3, 'T${num}', 'btn-${num}')" ${disableAttr} class="flex-1 text-[10px] lg:text-[11px] font-medium text-neutral-500 bg-transparent hover:bg-neutral-800 hover:text-white active:bg-neutral-700 active:text-white transition-colors">T</button>
           </div>
         </div>
       `).join('');
 
       const winActionsHTML = `
-        <div class="flex-1 flex flex-col items-center justify-start pt-4 gap-5 w-full animate-fade-in pb-10">
-          <button onclick="window.toggleRecord()" class="w-[220px] py-4 rounded-lg border border-neutral-800 text-white font-medium text-xs tracking-[0.15em] uppercase transition-colors hover:bg-neutral-900">ROUND HISTORY</button>
-          <button onclick="window.initGame()" class="w-[220px] py-4 rounded-lg bg-white text-black font-medium text-xs tracking-[0.15em] uppercase transition-colors hover:bg-neutral-200">RESTART</button>
+        <div class="flex-1 flex flex-col items-center justify-start pt-4 gap-5 w-full animate-fade-in pb-10 lg:pb-0">
+          <button onclick="window.toggleRecord()" class="w-[220px] lg:w-[260px] py-4 lg:py-5 rounded-lg border border-neutral-800 text-white font-medium text-xs lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-900 active:bg-neutral-800 transition-colors">ROUND HISTORY</button>
+          <button onclick="window.initGame()" class="w-[220px] lg:w-[260px] py-4 lg:py-5 rounded-lg bg-white text-black font-medium text-xs lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-200 active:bg-neutral-300 transition-colors">RESTART</button>
         </div>
       `;
 
       const controlPanelHTML = gameState.winner ? winActionsHTML : `
         <div class="flex-none bg-black">
-          <div class="flex gap-2 mb-2 px-4">
-            <button id="btn-sbull" onclick="window.handleThrow(25, 1, 'S-BULL', 'btn-sbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn hover:bg-neutral-800 transition-colors">S-BULL</button>
-            <button id="btn-dbull" onclick="window.handleThrow(50, 1, 'D-BULL', 'btn-dbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn hover:bg-neutral-800 transition-colors">D-BULL</button>
-            <button id="btn-miss" onclick="window.handleThrow(0, 1, 'MISS', 'btn-miss')" ${disableAttr} class="w-[72px] bg-black border border-neutral-800 text-white py-2.5 rounded-lg font-medium text-xs tracking-[0.15em] uppercase action-btn hover:bg-neutral-800 transition-colors">MISS</button>
+          <div class="flex gap-2 lg:gap-3 mb-2 lg:mb-3 px-4 lg:px-6">
+            <button id="btn-sbull" onclick="window.handleThrow(25, 1, 'S-BULL', 'btn-sbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 lg:py-3 rounded-lg font-medium text-xs lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-800 active:bg-neutral-700 transition-colors">S-BULL</button>
+            <button id="btn-dbull" onclick="window.handleThrow(50, 1, 'D-BULL', 'btn-dbull')" ${disableAttr} class="flex-1 bg-black border border-neutral-800 text-white py-2.5 lg:py-3 rounded-lg font-medium text-xs lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-800 active:bg-neutral-700 transition-colors">D-BULL</button>
+            <button id="btn-miss" onclick="window.handleThrow(0, 1, 'MISS', 'btn-miss')" ${disableAttr} class="w-[72px] lg:w-[90px] bg-black border border-neutral-800 text-white py-2.5 lg:py-3 rounded-lg font-medium text-xs lg:text-[14px] tracking-[0.15em] uppercase hover:bg-neutral-800 active:bg-neutral-700 transition-colors">MISS</button>
           </div>
-          <div class="grid grid-cols-5 gap-2 px-4 pb-6 overflow-y-auto hide-scrollbar">${keypadHTML}</div>
+          <div class="grid grid-cols-5 gap-2 lg:gap-3 px-4 lg:px-6 pb-6 lg:pb-0 overflow-y-auto hide-scrollbar">${keypadHTML}</div>
         </div>
       `;
 
       appDiv.innerHTML = `
         ${menuHTML}
         ${recordHTML}
-        <div class="max-w-md mx-auto w-full bg-black relative flex flex-col h-full overflow-hidden">
-          <header class="flex-none pt-6 pb-2 px-5 flex items-start justify-between sticky top-0 bg-black/95 backdrop-blur z-30">
-            <div class="flex items-start"><img src="./assets/Logo.svg" alt="Target" class="h-[19px] object-contain opacity-90"></div>
-            <div class="flex items-start gap-5">
-              <button onclick="window.openMenu()" class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/setting.svg" alt="Settings" class="h-[12px] object-contain"></button>
-              <button onclick="window.toggleRecord()" class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/record.svg" alt="Record" class="h-[15px] object-contain"></button>
-              <button onclick="window.handleUndo()" ${historyStack.length === 0 ? 'disabled style="opacity:0.2"' : ''} class="flex items-start justify-center opacity-70 hover:opacity-100 transition-opacity"><img src="./assets/back.svg" alt="Undo" class="h-[13px] object-contain"></button>
+        ${editModalHTML}
+        
+        <!-- App Container: 全螢幕闊度，承載 Header 同 Absolute 元素 -->
+        <div class="w-full h-full bg-black relative flex flex-col overflow-hidden">
+          
+          <!-- Header (全寬貼邊) -->
+          <header class="flex-none pt-6 pb-2 px-5 lg:px-12 flex items-start justify-between z-30 w-full">
+            <div class="flex items-start"><img src="./assets/Logo.svg" alt="Target" class="h-[19px] lg:h-[25px] object-contain opacity-90"></div>
+            <div class="flex items-start gap-5 lg:gap-8">
+              <button onclick="window.openMenu()" class="flex items-start justify-center opacity-70 hover:opacity-100 active:opacity-100 transition-opacity"><img src="./assets/setting.svg" alt="Settings" class="h-[12px] lg:h-[16px] object-contain"></button>
+              <button onclick="window.toggleRecord()" class="flex items-start justify-center opacity-70 hover:opacity-100 active:opacity-100 transition-opacity"><img src="./assets/record.svg" alt="Record" class="h-[15px] lg:h-[20px] object-contain"></button>
+              <button onclick="window.handleUndo()" ${historyStack.length === 0 ? 'disabled style="opacity:0.2"' : ''} class="flex items-start justify-center opacity-70 hover:opacity-100 active:opacity-100 transition-opacity"><img src="./assets/back.svg" alt="Undo" class="h-[13px] lg:h-[17px] object-contain"></button>
             </div>
           </header>
 
-          <main class="flex-1 flex flex-col min-h-0">
-            <div class="flex-1 relative min-h-0 flex flex-col">
-              <div class="absolute top-0 left-5 z-20 pointer-events-none">
-                <div class="text-[10px] text-neutral-400 font-medium tracking-[0.15em] leading-relaxed uppercase">
-                  ${settings.gameMode} <span class="mx-1 opacity-50">|</span> ${settings.startingScore}<br>
-                  ${settings.checkoutMode.replace(' out', '').toUpperCase()}<br>
-                  ROUND ${gameState.currentRound}
-                </div>
-              </div>
+          <!-- 狀態字眼 (貼左側螢幕邊界) -->
+          <div class="absolute top-[60px] lg:top-[85px] left-5 lg:left-12 z-20 pointer-events-none">
+            <div class="text-[10px] lg:text-[13px] text-neutral-400 font-medium tracking-[0.15em] leading-relaxed uppercase">
+              ${settings.gameMode} <span class="mx-1 opacity-50">|</span> ${settings.startingScore}<br>
+              ${settings.checkoutMode.replace(' out', '').toUpperCase()}<br>
+              ROUND ${gameState.currentRound}
+            </div>
+          </div>
 
-              <div class="flex-1 flex items-center justify-center px-4 pt-0 min-h-0 overflow-hidden">
-                <!-- 移除了 pointer-events-none，令標靶可以被點擊 -->
-                <svg viewBox="-105 -105 210 210" class="h-full w-auto max-w-full">
+          <!-- 內容區域：限制在 1200px 內並置中 -->
+          <main class="flex-1 w-full max-w-md lg:max-w-[1200px] mx-auto flex flex-col lg:flex-row min-h-0 relative z-10">
+            
+            <!-- 左側：標靶 (Mobile: 上方/佔滿剩餘空間) -->
+            <div class="flex-1 relative min-h-0 flex flex-col lg:justify-center lg:py-8 lg:pr-8">
+              <!-- 標靶容器 -->
+              <div class="flex-1 flex items-center justify-center p-4 lg:p-0 w-full h-full min-h-0 overflow-hidden">
+                <svg viewBox="-105 -105 210 210" class="h-full w-auto max-w-full max-h-full">
                   ${dynamicSVG}
                 </svg>
               </div>
             </div>
 
-            <div class="flex-none">
-              ${playersCardsHTML}
-              <div class="mt-4 mb-4 px-4 h-12">${statusBannerHTML}</div>
-            </div>
-          </main>
+            <!-- 右側：分數與鍵盤 (Mobile: 靠底, Desktop: 垂直置中) -->
+            <div class="flex-none lg:w-[480px] lg:h-full flex flex-col justify-end lg:justify-center lg:border-l lg:border-neutral-900/50 bg-black z-10 relative">
+              
+              <!-- 喺 Desktop，將分數區同鍵盤區加 gap 分開，垂直置中 -->
+              <div class="flex-none lg:mb-4">
+                ${playersCardsHTML}
+                <div class="mt-4 mb-4 px-4 lg:px-6 h-12">${statusBannerHTML}</div>
+              </div>
 
-          <footer class="flex-none">
-            ${controlPanelHTML}
-          </footer>
+              <div class="flex-none">
+                ${controlPanelHTML}
+              </div>
+
+            </div>
+
+          </main>
         </div>
       `;
     }
